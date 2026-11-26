@@ -2,7 +2,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { supabase } from "@/lib/supabase";
 import { addDays, dayNum, earliestBookable, fromISO, monthNum, nowJST, toISO, weekOf, weekday, yearNum, WEEKDAYS } from "@/lib/date";
-import { MAX_LEN, freeWindow, type Booking, type Column, type Room, type Selection } from "@/lib/types";
+import { type Booking, type Column, type Room, type Selection } from "@/lib/types";
+import { busyList, type Busy } from "@/lib/slots";
+import { useShopCalendar } from "@/lib/useShopCalendar";
 import TimeGrid from "@/components/TimeGrid";
 import BookingSheet from "@/components/BookingSheet";
 
@@ -27,7 +29,7 @@ export default function Home() {
   const [weekRoom, setWeekRoom] = useState<number | null>(null);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loadError, setLoadError] = useState(false);
-  const [picked, setPicked] = useState<{ sel: Selection; win: { lo: number; hi: number } } | null>(null);
+  const [picked, setPicked] = useState<{ sel: Selection; col: Column } | null>(null);
   const source = useRef<string | null>(null);
   const headerRef = useRef<HTMLElement>(null);
 
@@ -86,6 +88,9 @@ export default function Home() {
     return () => document.removeEventListener("visibilitychange", f);
   }, [load]);
 
+  // 営業時間・予約不可枠（migration 004 の前は既定値 10:00〜21:00・予約不可なし）
+  const { hoursOf, closedOf, range } = useShopCalendar(from, to);
+
   const columns: Column[] = useMemo(() => {
     if (!anchor) return [];
     if (view === "day") return rooms.map((r) => ({ key: `r${r.id}`, roomId: r.id, date: anchor }));
@@ -112,11 +117,13 @@ export default function Home() {
 
   if (!now || !anchor) return <div className="min-h-dvh bg-white" />;
 
-  const pick = (col: Column, m: number) => {
-    const win = freeWindow(bookings, col.roomId, col.date, m, earliestBookable(col.date, now));
-    if (!win) return;
-    setPicked({ sel: { roomId: col.roomId, date: col.date, start: m, end: Math.min(m + 60, win.hi, m + MAX_LEN) }, win });
-  };
+  /** その列（部屋×日）の「予約できない時間帯」 */
+  const busyOf = (col: Column): Busy[] => busyList({
+    booked: bookings.filter((b) => b.room_id === col.roomId && b.date === col.date),
+    closed: closedOf(col.roomId, col.date),
+    hours: hoursOf(col.date),
+    earliest: earliestBookable(col.date, now),
+  });
   const pickedRoom = picked ? rooms.find((r) => r.id === picked.sel.roomId) : undefined;
 
   const title = (() => {
@@ -190,14 +197,15 @@ export default function Home() {
 
       <main className="mx-auto max-w-6xl pb-24 md:px-8">
         <p className="px-4 py-3 text-sm text-neutral-600 md:px-0">
-          空いている時間をタップすると、その時刻から予約できます（15分単位・30分〜3時間）
+          空いている時間をタップ、または{isMobile ? "長押しして" : ""}なぞって選ぶと予約できます（15分単位・30分〜3時間）
         </p>
         {loadError && (
           <p className="mx-4 mb-3 border-l-2 border-red-600 bg-red-50 px-3 py-2 text-sm text-red-800 md:mx-0">
             空き状況を読み込めませんでした。通信状況を確認してください。
           </p>
         )}
-        <TimeGrid columns={columns} rooms={rooms} bookings={bookings} now={now} onPick={pick}
+        <TimeGrid columns={columns} rooms={rooms} busyOf={busyOf} range={range} now={now}
+          onSelect={(col, r) => setPicked({ col, sel: { roomId: col.roomId, date: col.date, ...r } })}
           selection={picked?.sel ?? null}
           minColWidth={view === "day" ? "8.5rem" : "0px"}
           header={(c) => view === "day" ? <RoomHeader room={rooms.find((r) => r.id === c.roomId)} /> : <DayHeader date={c.date} today={now.date} />} />
@@ -206,7 +214,7 @@ export default function Home() {
 
       {picked && pickedRoom && (
         <BookingSheet
-          selection={picked.sel} window={picked.win} room={pickedRoom} source={source.current}
+          selection={picked.sel} busy={busyOf(picked.col)} range={range} room={pickedRoom} source={source.current}
           onChange={(sel) => setPicked({ ...picked, sel })}
           onClose={() => setPicked(null)}
           onBooked={load}
@@ -256,7 +264,7 @@ function Legend() {
     <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 px-4 text-xs text-neutral-600 md:px-0">
       <span className="flex items-center gap-1.5"><i className="size-2.5 rounded-xs border border-neutral-300 bg-white" />空き</span>
       <span className="flex items-center gap-1.5"><i className="size-2.5 rounded-xs border-l-2 border-neutral-500 bg-neutral-200" />予約済（色は部屋ごと）</span>
-      <span className="flex items-center gap-1.5"><i className="size-2.5 rounded-xs bg-neutral-100" />受付終了</span>
+      <span className="flex items-center gap-1.5"><i className="size-2.5 rounded-xs bg-neutral-100" />受付終了・予約不可</span>
       <span className="flex items-center gap-1.5"><i className="h-px w-3 bg-red-600" />現在時刻</span>
     </div>
   );

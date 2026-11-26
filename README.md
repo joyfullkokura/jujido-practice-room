@@ -15,6 +15,7 @@ Next.js 16 (App Router) + Supabase + Tailwind CSS。本番: https://jujido-pract
 ## 確認用スクリプト
 - 権限テスト（一般利用者の立場）: `node --env-file=.env.local scripts/test-security.mjs`
   - テスト予約は 2099 年に入る。削除: `delete from reservations where name = '__TEST__';`
+- 画面の動作テスト（ドラッグ選択・時刻リスト。サンプルデータ使用）: `npm run dev` を起動して `node scripts/test-ui.mjs`
 - スクリーンショット: `node scripts/screenshot.mjs http://localhost:3000 screenshots [2026-11-27T15:20:00+09:00] [--mock]`（--mock はサンプルデータで表示）
   （初回は `npx playwright install chromium`）
 

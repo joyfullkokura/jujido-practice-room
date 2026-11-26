@@ -2,13 +2,15 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { fmtDate, toISO } from "@/lib/date";
-import { MAX_LEN, MIN_LEN, STEP, fmtLen, fmtMin, type Room, type Selection } from "@/lib/types";
+import { fmtLen, fmtMin, type Room, type Selection } from "@/lib/types";
+import { STEP, endOptions, maxEnd, moveStart, startOptions, type Busy } from "@/lib/slots";
 import BottomSheet from "@/components/BottomSheet";
 
 type Props = {
   selection: Selection;
-  /** 選んだ位置を含む空き時間帯（この範囲で開始・終了を動かせる） */
-  window: { lo: number; hi: number };
+  /** その部屋・その日の「予約できない時間帯」 */
+  busy: Busy[];
+  range: { open: number; close: number };
   room: Room;
   source: string | null;
   onChange: (sel: Selection) => void;
@@ -20,7 +22,7 @@ const input = "h-12 w-full rounded-sm border border-neutral-300 bg-white px-3 te
 const labelCls = "mb-1.5 block text-sm font-semibold text-neutral-700";
 const PRESETS = [30, 60, 90, 120, 180];
 
-export default function BookingSheet({ selection, window: win, room, source, onChange, onClose, onBooked }: Props) {
+export default function BookingSheet({ selection, busy, range, room, source, onChange, onClose, onBooked }: Props) {
   const [name, setName] = useState("");
   const [school, setSchool] = useState("");
   const [sending, setSending] = useState(false);
@@ -28,14 +30,18 @@ export default function BookingSheet({ selection, window: win, room, source, onC
   const [done, setDone] = useState<{ sel: Selection; room: Room } | null>(null);
   const { start, end } = selection;
   const len = end - start;
-  const maxEnd = (s: number) => Math.min(win.hi, s + MAX_LEN);
+
+  const starts = startOptions(busy, range);
+  const ends = endOptions(busy, start, range);
+  const okStart = (m: number) => starts.some((o) => o.m === m && o.ok);
+  const okEnd = (m: number) => ends.some((o) => o.m === m && o.ok);
+  /** 開始を変える（終了は「開始の30分後〜3時間後、かつ次の予約の直前まで」に自動で収める） */
+  const setStart = (m: number) => { const r = moveStart(busy, m, len); if (r) onChange({ ...selection, ...r }); };
+  /** − / ＋ はちょうど15分ずつ（ほかの予約を飛び越えない） */
+  const prevS = okStart(start - STEP) ? start - STEP : null;
+  const nextS = okStart(start + STEP) ? start + STEP : null;
 
   useEffect(() => setError(""), [selection.date, start, end, selection.roomId]);
-
-  /** 開始を動かす：長さはなるべく保つ */
-  const moveStart = (s: number) => onChange({ ...selection, start: s, end: Math.min(Math.max(s + len, s + MIN_LEN), maxEnd(s)) });
-  const canStart = (s: number) => s >= win.lo && maxEnd(s) - s >= MIN_LEN;
-  const canEnd = (e: number) => e - start >= MIN_LEN && e <= maxEnd(start);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -82,20 +88,20 @@ export default function BookingSheet({ selection, window: win, room, source, onC
           </p>
           {room.description && <p className="mt-1 text-sm text-neutral-500">{room.description}</p>}
 
-          {/* 時間：開始・終了を15分ずつ調整 */}
+          {/* 時間：リストから直接選ぶ／− ＋ で15分ずつ */}
           <div className="mt-5">
-            <span className={labelCls}>時間</span>
+            <span className={labelCls}>時間<span className="ml-2 text-xs font-normal text-neutral-500 tabular-nums">{fmtLen(len)}</span></span>
             <div className="divide-y divide-neutral-200 rounded-sm border border-neutral-300">
-              <Stepper label="開始" value={start}
-                onMinus={() => moveStart(start - STEP)} minusOk={canStart(start - STEP)}
-                onPlus={() => moveStart(start + STEP)} plusOk={canStart(start + STEP)} />
-              <Stepper label="終了" value={end}
-                onMinus={() => onChange({ ...selection, end: end - STEP })} minusOk={canEnd(end - STEP)}
-                onPlus={() => onChange({ ...selection, end: end + STEP })} plusOk={canEnd(end + STEP)} />
+              <TimeRow label="開始" value={start} options={starts} onSelect={setStart}
+                onMinus={() => prevS != null && setStart(prevS)} minusOk={prevS != null}
+                onPlus={() => nextS != null && setStart(nextS)} plusOk={nextS != null} />
+              <TimeRow label="終了" value={end} options={ends} onSelect={(m) => onChange({ ...selection, end: m })}
+                onMinus={() => onChange({ ...selection, end: end - STEP })} minusOk={okEnd(end - STEP)}
+                onPlus={() => onChange({ ...selection, end: end + STEP })} plusOk={okEnd(end + STEP)} />
             </div>
             <div className="mt-2 grid grid-cols-5 gap-px overflow-hidden rounded-sm border border-neutral-300 bg-neutral-300">
               {PRESETS.map((p) => {
-                const ok = canEnd(start + p), active = len === p;
+                const ok = okEnd(start + p), active = len === p;
                 return (
                   <button key={p} type="button" disabled={!ok} aria-pressed={active}
                     onClick={() => onChange({ ...selection, end: start + p })}
@@ -105,6 +111,9 @@ export default function BookingSheet({ selection, window: win, room, source, onC
                 );
               })}
             </div>
+            <p className="mt-1.5 text-xs text-neutral-500 tabular-nums">
+              この開始時刻なら {fmtMin(maxEnd(busy, start))} まで延ばせます
+            </p>
           </div>
 
           <label className="mt-5 block">
@@ -130,15 +139,29 @@ export default function BookingSheet({ selection, window: win, room, source, onC
   );
 }
 
-function Stepper({ label, value, onMinus, onPlus, minusOk, plusOk }: {
-  label: string; value: number; onMinus: () => void; onPlus: () => void; minusOk: boolean; plusOk: boolean;
+/** 開始／終了の1行：− [時刻リスト] ＋ 。選べない時刻はグレー（disabled） */
+function TimeRow({ label, value, options, onSelect, onMinus, onPlus, minusOk, plusOk }: {
+  label: string; value: number; options: { m: number; ok: boolean }[]; onSelect: (m: number) => void;
+  onMinus: () => void; onPlus: () => void; minusOk: boolean; plusOk: boolean;
 }) {
-  const btn = "flex size-12 items-center justify-center text-xl text-neutral-700 active:bg-neutral-100 disabled:text-neutral-300";
+  const btn = "flex size-12 shrink-0 items-center justify-center text-xl text-neutral-700 active:bg-neutral-100 disabled:text-neutral-300";
   return (
     <div className="flex items-center">
-      <span className="w-14 pl-3 text-sm text-neutral-500">{label}</span>
+      <span className="w-12 shrink-0 pl-3 text-sm text-neutral-500">{label}</span>
       <button type="button" aria-label={`${label}を15分早く`} disabled={!minusOk} onClick={onMinus} className={`${btn} border-x border-neutral-200`}>−</button>
-      <span className="flex-1 text-center text-2xl font-semibold tabular-nums">{fmtMin(value)}</span>
+      <div className="relative h-12 min-w-0 flex-1">
+        <select aria-label={`${label}時刻`} value={value} onChange={(e) => onSelect(Number(e.target.value))}
+          className="h-full w-full cursor-pointer appearance-none bg-transparent text-center text-2xl font-semibold tabular-nums outline-none focus:bg-accent-soft [text-align-last:center]">
+          {options.map((o) => (
+            <option key={o.m} value={o.m} disabled={!o.ok} className={o.ok ? "text-neutral-900" : "text-neutral-300"}>
+              {fmtMin(o.m)}{o.ok ? "" : "（×）"}
+            </option>
+          ))}
+        </select>
+        <svg className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 text-neutral-400" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+          <path d="M3 4.5 6 7.5l3-3" />
+        </svg>
+      </div>
       <button type="button" aria-label={`${label}を15分遅く`} disabled={!plusOk} onClick={onPlus} className={`${btn} border-l border-neutral-200`}>＋</button>
     </div>
   );
