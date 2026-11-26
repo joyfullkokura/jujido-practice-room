@@ -154,6 +154,12 @@ const closeSheet = async (page) => { await page.keyboard.press("Escape"); await 
   check("ドラッグ中にプレビューが出る", !!pv && pv.includes("13:00–14:15"), pv ?? "なし");
   await closeSheet(page);
 
+  await cell(page, 1, "14:30").tap();
+  await page.waitForTimeout(400);
+  const s2 = await sheetTimes(page).catch(() => null);
+  check("短くタップすると 14:30〜15:30（1時間）", s2?.start === "14:30" && s2?.end === "15:30", s2 ? `${s2.start}〜${s2.end}` : "なし");
+  await closeSheet(page);
+
   const before = await page.evaluate(() => scrollY);
   const c = await center(page, 1, "15:00");
   await touch("touchStart", c);
@@ -164,11 +170,6 @@ const closeSheet = async (page) => { await page.keyboard.press("Escape"); await 
   const sheetOpen = await page.locator('[role="dialog"]').count();
   check("すぐに指を動かすと普通のスクロール（範囲選択にならない）", sheetOpen === 0 && after > before, `scroll ${before}→${after}`);
 
-  await page.waitForTimeout(1500); // 慣性スクロールが止まるのを待つ（スクロール中のタップは「止める」操作になるため）
-  await cell(page, 1, "14:30").tap();
-  await page.waitForTimeout(400);
-  const s2 = await sheetTimes(page).catch(() => null);
-  check("短くタップすると 14:30〜15:30（1時間）", s2?.start === "14:30" && s2?.end === "15:30", s2 ? `${s2.start}〜${s2.end}` : "なし");
   await ctx.close();
 }
 

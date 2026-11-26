@@ -19,6 +19,8 @@ type Props = {
   onSelect: (col: Column, r: { start: number; end: number }) => void;
   /** 列の最小幅。超えると横スクロール（時刻の列は左に固定） */
   minColWidth: string;
+  /** 管理画面用：予約済みブロックを押したとき */
+  onBookedClick?: (col: Column, b: Busy) => void;
 };
 
 type Drag = { col: Column; anchor: number; cur: number; moved: boolean };
@@ -28,7 +30,7 @@ const HOUR = "[--hour:4.5rem] md:[--hour:3.75rem]";
 const TIME_COL = "3.5rem";
 const LONG_PRESS_MS = 400;
 
-export default function TimeGrid({ columns, header, rooms, busyOf, range, selection, now, onSelect, minColWidth }: Props) {
+export default function TimeGrid({ columns, header, rooms, busyOf, range, selection, now, onSelect, minColWidth, onBookedClick }: Props) {
   const headRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
@@ -228,16 +230,24 @@ export default function TimeGrid({ columns, header, rooms, busyOf, range, select
                 ))}
 
                 {/* 予約済み（実際の時刻どおりの高さ） */}
-                {busy.filter((b) => b.kind === "booked").map((b) => (
-                  <div key={`b${b.start}`}
-                    className="pointer-events-none absolute inset-x-0.5 overflow-hidden rounded-xs border-l-2 px-1.5 py-0.5"
-                    style={{ top: `calc(${y(b.start)} + 1px)`, height: `calc(${h(b.end - b.start)} - 2px)`, background: tint(color), borderLeftColor: color }}>
-                    <p className="truncate text-xs font-semibold leading-tight text-neutral-800">予約済</p>
-                    {b.end - b.start >= 45 && (
-                      <p className="truncate text-[11px] leading-tight text-neutral-600 tabular-nums">{fmtMin(b.start)}–{fmtMin(b.end)}</p>
-                    )}
-                  </div>
-                ))}
+                {busy.filter((b) => b.kind === "booked").map((b) => {
+                  const style = { top: `calc(${y(b.start)} + 1px)`, height: `calc(${h(b.end - b.start)} - 2px)`, background: tint(color), borderLeftColor: color };
+                  const body = (
+                    <>
+                      <p className="truncate text-xs font-semibold leading-tight text-neutral-800">{b.title ?? "予約済"}</p>
+                      {b.end - b.start >= 45 && (
+                        <p className="truncate text-[11px] leading-tight text-neutral-600 tabular-nums">{b.sub ?? `${fmtMin(b.start)}–${fmtMin(b.end)}`}</p>
+                      )}
+                    </>
+                  );
+                  const cls = "absolute inset-x-0.5 overflow-hidden rounded-xs border-l-2 px-1.5 py-0.5 text-left";
+                  return onBookedClick ? (
+                    <button key={`b${b.start}`} type="button" onClick={() => onBookedClick(c, b)}
+                      className={`${cls} z-[5] flex flex-col items-stretch justify-start hover:brightness-95`} style={style}>{body}</button>
+                  ) : (
+                    <div key={`b${b.start}`} className={`${cls} pointer-events-none`} style={style}>{body}</div>
+                  );
+                })}
 
                 {/* 選択中（ドラッグ中はリアルタイム） */}
                 {sel && (

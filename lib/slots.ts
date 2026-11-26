@@ -10,11 +10,15 @@ export type Busy = {
   /** booked=予約済 closed=予約不可枠 hours=営業時間外 past=過ぎた時間 */
   kind: "booked" | "closed" | "hours" | "past";
   label?: string;
+  /** 管理画面用：予約ID・表示する名前など */
+  id?: number;
+  title?: string;
+  sub?: string;
 };
 
 /** 1つの列（部屋×日）の「予約できない時間帯」をまとめる */
 export function busyList(opts: {
-  booked: { start: number; end: number }[];
+  booked: { start: number; end: number; id?: number; title?: string; sub?: string }[];
   closed?: { start: number; end: number; label?: string }[];
   /** その日の営業時間。null は休業日 */
   hours: { open: number; close: number } | null;

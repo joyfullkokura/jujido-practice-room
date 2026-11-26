@@ -108,6 +108,120 @@ check("rooms に追加できない", !!r.error, desc(r));
 r = await sb.from("rooms").update({ name: "x" }).eq("id", ROOM).select();
 check("rooms を書き換えられない", denied(r), desc(r));
 
+// ───────── ここから管理者まわり（migration 004 以降） ─────────
+const has004 = !(await sb.from("business_hours").select("weekday").limit(1)).error;
+if (!has004) {
+  console.log("\n⚠ business_hours が無いため、管理者まわりのテストはスキップ（migration 004 の実行後に有効）");
+} else {
+  console.log("--- 一般の利用者（anon）と営業時間・予約不可枠");
+  r = await sb.from("business_hours").select("weekday, open_time, close_time, is_closed");
+  check("営業時間は誰でも読める（7曜日）", r.data?.length === 7, desc(r));
+  r = await sb.from("business_hours").update({ is_closed: true }).eq("weekday", 0).select();
+  check("anon は営業時間を変えられない", denied(r), desc(r));
+  r = await sb.from("closures").insert({ room_id: null, start_at: at("10:00"), end_at: at("11:00"), reason: "__TEST__" });
+  check("anon は予約不可枠を追加できない", !!r.error, desc(r));
+  r = await sb.from("admins").select("user_id");
+  check("anon は admins を読めない", denied(r), desc(r));
+  r = await sb.rpc("is_admin");
+  check("anon の is_admin() は false", r.data === false, desc(r));
+
+  const env = process.env;
+  if (!env.TEST_ADMIN_EMAIL || !env.TEST_USER_EMAIL) {
+    console.log("\n⚠ .env.test.local（TEST_ADMIN_EMAIL など）が無いため、ログインが必要なテストはスキップ");
+    ng++;
+  } else {
+    const login = async (email, password) => {
+      const c = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_KEY, { auth: { persistSession: false } });
+      const { error } = await c.auth.signInWithPassword({ email, password });
+      return { c, error };
+    };
+
+    console.log("--- ログインしているが管理者ではないユーザー");
+    const { c: u, error: ue } = await login(env.TEST_USER_EMAIL, env.TEST_USER_PASSWORD);
+    check("テスト用ユーザーでログインできる", !ue, ue?.message);
+    r = await u.rpc("is_admin");
+    check("is_admin() は false", r.data === false, desc(r));
+    r = await u.from("reservations").select("name, school").gte("start_at", at("00:00"));
+    check("予約の名前・学校名は読めない", denied(r), desc(r));
+    r = await u.from("reservations").update({ status: "cancelled" }).gte("start_at", at("00:00")).select();
+    check("予約をキャンセルできない", denied(r), desc(r));
+    r = await u.from("reservations").insert({ room_id: ROOM, start_at: at("19:00"), end_at: at("20:00"), name: "__TEST__" });
+    check("予約を直接入れられない（代理予約できない）", !!r.error, desc(r));
+    r = await u.from("rooms").insert({ name: "__TEST__" });
+    check("部屋を追加できない", !!r.error, desc(r));
+    r = await u.from("rooms").update({ name: "x" }).eq("id", ROOM).select();
+    check("部屋を編集できない", denied(r), desc(r));
+    r = await u.from("rooms").delete().eq("id", ROOM).select();
+    check("部屋を削除できない", denied(r), desc(r));
+    r = await u.from("closures").insert({ room_id: null, start_at: at("10:00"), end_at: at("11:00"), reason: "__TEST__" });
+    check("予約不可枠を追加できない", !!r.error, desc(r));
+    r = await u.from("business_hours").update({ is_closed: true }).eq("weekday", 0).select();
+    check("営業時間を変えられない", denied(r), desc(r));
+    r = await u.from("admins").insert({ user_id: (await u.auth.getUser()).data.user?.id });
+    check("自分を管理者に登録できない", !!r.error, desc(r));
+    await u.auth.signOut();
+
+    console.log("--- 管理者");
+    const { c: a, error: ae } = await login(env.TEST_ADMIN_EMAIL, env.TEST_ADMIN_PASSWORD);
+    check("管理者でログインできる", !ae, ae?.message);
+    r = await a.rpc("is_admin");
+    check("is_admin() は true", r.data === true, desc(r));
+    r = await a.from("reservations").select("id, name, school, source, status, start_at").eq("room_id", ROOM)
+      .gte("start_at", at("00:00")).lt("start_at", at("23:59")).order("start_at");
+    check("管理者は名前・学校名・流入元を読める", r.data?.length === 3 && r.data.every((x) => x.name === "__TEST__"), desc(r));
+    const main = r.data?.find((x) => x.start_at.includes("06:15")); // 15:15 JST
+    r = await a.from("reservations").update({ status: "cancelled" }).eq("id", main?.id).select("status, cancelled_at");
+    check("キャンセルできる（キャンセル日時は自動で記録）", r.data?.[0]?.status === "cancelled" && !!r.data?.[0]?.cancelled_at, desc(r));
+    check("キャンセルした枠は空き状況から消える", (await ranges()) === "14:45-15:15,16:45-17:15", await ranges());
+    r = await book("15:30", "16:00");
+    check("空いた枠に一般の予約が入る", !r.error, desc(r));
+    r = await a.from("reservations").update({ status: "confirmed" }).eq("id", main?.id).select();
+    check("重なる予約があるとキャンセルの取り消しは拒否 (23P01)", r.error?.code === "23P01", desc(r));
+    const blocker = (await a.from("reservations").select("id").eq("room_id", ROOM).eq("status", "confirmed").eq("start_at", at("15:30"))).data?.[0]?.id;
+    await a.from("reservations").update({ status: "cancelled" }).eq("id", blocker);
+    r = await a.from("reservations").update({ status: "confirmed" }).eq("id", main?.id).select("status, cancelled_at");
+    check("重なりがなくなれば取り消せる（キャンセル日時は消える）", r.data?.[0]?.status === "confirmed" && r.data?.[0]?.cancelled_at === null, desc(r));
+    r = await a.from("reservations").insert({ room_id: ROOM, start_at: at("19:00"), end_at: at("20:00"), name: "__TEST__", source: "admin" });
+    check("代理予約できる", !r.error, desc(r));
+    r = await a.from("reservations").insert({ room_id: ROOM, start_at: at("19:30"), end_at: at("20:30"), name: "__TEST__", source: "admin" });
+    check("代理予約でも重なりは拒否 (23P01)", r.error?.code === "23P01", desc(r));
+
+    r = await a.from("closures").insert({ room_id: ROOM, start_at: at("18:00"), end_at: at("19:00"), reason: "__TEST__" }).select("id");
+    const closureId = r.data?.[0]?.id;
+    check("予約不可枠を追加できる", !!closureId, desc(r));
+    r = await sb.from("closures").select("room_id, reason").eq("id", closureId);
+    check("予約不可枠は一般の利用者にも見える", r.data?.[0]?.reason === "__TEST__", desc(r));
+    r = await book("18:00", "18:30");
+    check("予約不可枠の時間は一般の予約を拒否", r.error?.code === "P0001", desc(r));
+    r = await a.from("closures").delete().eq("id", closureId).select();
+    check("予約不可枠を削除できる", r.data?.length === 1, desc(r));
+    r = await book("18:00", "18:30");
+    check("削除後はその時間を予約できる", !r.error, desc(r));
+
+    r = await a.from("rooms").insert({ name: "__TEST__", color: "#6b6b6b", is_public: false, sort_order: 999 }).select("id");
+    const testRoom = r.data?.[0]?.id;
+    check("部屋を追加できる（非公開）", !!testRoom, desc(r));
+    r = await sb.from("rooms").select("id").eq("id", testRoom);
+    check("非公開の部屋は一般の利用者に見えない", denied(r), desc(r));
+    r = await sb.rpc("create_reservation", { p_room_id: testRoom, p_start_at: at("12:00"), p_end_at: at("13:00"), p_name: "__TEST__" });
+    check("非公開の部屋は一般の予約を拒否", r.error?.code === "P0001", desc(r));
+    r = await a.from("rooms").update({ description: "テスト" }).eq("id", testRoom).select();
+    check("部屋を編集できる", r.data?.length === 1, desc(r));
+    r = await a.from("rooms").delete().eq("id", testRoom).select();
+    check("予約のない部屋は削除できる", r.data?.length === 1, desc(r));
+    r = await a.from("rooms").delete().eq("id", ROOM).select();
+    check("予約が残っている部屋は削除できない (23503)", r.error?.code === "23503", desc(r));
+
+    const wd = new Date(date + "T00:00:00Z").getUTCDay();
+    const cur = (await a.from("business_hours").select("open_time, close_time, is_closed").eq("weekday", wd)).data?.[0];
+    r = await a.from("business_hours").update(cur).eq("weekday", wd).select();
+    check("営業時間を更新できる（同じ値で上書きして確認）", r.data?.length === 1, desc(r));
+    r = await a.from("admins").insert({ user_id: "00000000-0000-0000-0000-000000000000" });
+    check("管理者でも API から管理者を追加できない（SQL Editor のみ）", !!r.error, desc(r));
+    await a.auth.signOut();
+  }
+}
+
 console.log(`\n結果: ${ok} 件OK / ${ng} 件NG`);
 console.log("テスト予約の削除（SQL Editor）: delete from reservations where name = '__TEST__';");
 process.exit(ng ? 1 : 0);
