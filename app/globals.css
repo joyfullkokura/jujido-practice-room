@@ -2,17 +2,21 @@
 
 @theme {
   --font-sans: var(--font-noto), "Hiragino Sans", system-ui, sans-serif;
-  /* アクセントカラーは1色だけ */
-  --color-accent: #3b5bdb;
-  --color-accent-soft: #edf1fd;
+  /* アクセントは1色だけ。使う場所は「選択中」「主ボタン」「今日」に限定 */
+  --color-accent: #2f55c4;
+  --color-accent-soft: #eef2fb;
+  /* 角丸は最小限 */
+  --radius-xs: 2px;
+  --radius-sm: 3px;
+  --radius-md: 4px;
 }
 
 :root { --header-h: 0px; }
 html { -webkit-tap-highlight-color: transparent; }
-body { background: #fff; color: #1f2328; }
+body { background: #fff; color: #1d2025; font-feature-settings: "palt" 1; }
 
-/* ボトムシートの出入り */
+/* ボトムシートの出入り（影やぼかしは使わない） */
 @keyframes sheet-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
-.animate-sheet-up { animation: sheet-up 0.28s cubic-bezier(0.2, 0.8, 0.2, 1); }
-.animate-fade-in { animation: fade-in 0.2s ease-out; }
+.animate-sheet-up { animation: sheet-up 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.animate-fade-in { animation: fade-in 0.18s ease-out; }

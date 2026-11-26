@@ -2,7 +2,8 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { fmtDate, fmtHour } from "@/lib/date";
-import { tint, type Room, type Selection } from "@/lib/types";
+import type { Room, Selection } from "@/lib/types";
+import BottomSheet from "@/components/BottomSheet";
 
 type Props = {
   selection: Selection;
@@ -18,19 +19,15 @@ type Props = {
   onBooked: () => void;
 };
 
+const input = "h-12 w-full rounded-sm border border-neutral-300 bg-white px-3 text-[17px] outline-none placeholder:text-neutral-400 focus:border-accent focus:ring-1 focus:ring-accent";
+const labelCls = "mb-1.5 block text-sm font-semibold text-neutral-700";
+
 export default function BookingSheet({ selection, endOptions, room, roomOptions, source, onChangeEnd, onChangeRoom, onClose, onBooked }: Props) {
   const [name, setName] = useState("");
   const [school, setSchool] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState<{ sel: Selection; room: Room } | null>(null);
-
-  // シートが開いている間は背景をスクロールさせない
-  useEffect(() => {
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => { document.body.style.overflow = prev; };
-  }, []);
 
   useEffect(() => setError(""), [selection.date, selection.start, selection.end, selection.roomId]);
 
@@ -46,104 +43,111 @@ export default function BookingSheet({ selection, endOptions, room, roomOptions,
     });
     setSending(false);
     if (!error) { setDone({ sel: selection, room }); onBooked(); return; }
-    if (error.code === "23505") setError("選んだ時間に、ちょうど別の予約が入りました。別の時間を選んでください。");
+    if (error.code === "23505" || error.code === "23P01") setError("選んだ時間に、ちょうど別の予約が入りました。別の時間を選んでください。");
     else if (error.code === "23514") setError("名前と学校名は50文字以内で入力してください。");
     else if (error.code === "P0001") setError(error.message);
     else setError("予約できませんでした。通信状況を確認して、もう一度お試しください。");
   }
 
-  const timeLabel = (s: Selection) => `${fmtDate(s.date)} ${fmtHour(s.start)}〜${fmtHour(s.end)}`;
-
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center" role="dialog" aria-modal="true">
-      <button aria-label="閉じる" className="animate-fade-in absolute inset-0 bg-black/30" onClick={onClose} />
-      <div className="animate-sheet-up relative max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-t-3xl bg-white px-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-3 shadow-[0_-8px_30px_rgba(0,0,0,0.12)]">
-        <div className="mx-auto mb-5 h-1.5 w-10 rounded-full bg-neutral-200" />
-
-        {done ? (
-          <div className="py-4 text-center">
-            <div className="mx-auto mb-4 flex size-16 items-center justify-center rounded-full bg-accent-soft text-3xl text-accent">✓</div>
-            <h2 className="text-xl font-bold">予約が完了しました</h2>
-            <p className="mt-3 text-lg">{timeLabel(done.sel)}</p>
-            <p className="mt-1 text-neutral-500">{done.room.name}</p>
-            <button onClick={onClose} className="mt-8 h-14 w-full rounded-2xl bg-accent text-lg font-bold text-white">閉じる</button>
+    <BottomSheet onClose={onClose} label="予約フォーム">
+      {done ? (
+        <div className="pt-2">
+          <p className="text-sm font-semibold text-accent">予約が完了しました</p>
+          <h2 className="mt-1 text-xl font-bold">ご予約内容</h2>
+          <dl className="mt-4 divide-y divide-neutral-200 border-y border-neutral-200 text-[17px]">
+            <Row k="日付" v={fmtDate(done.sel.date)} />
+            <Row k="時間" v={`${fmtHour(done.sel.start)}〜${fmtHour(done.sel.end)}`} />
+            <Row k="部屋" v={done.room.name} />
+          </dl>
+          <button onClick={onClose} className="mt-6 h-12 w-full rounded-sm border border-neutral-300 text-base font-semibold text-neutral-800 active:bg-neutral-100">
+            閉じる
+          </button>
+        </div>
+      ) : (
+        <form onSubmit={submit} className="pt-1">
+          <div className="flex items-baseline justify-between gap-3">
+            <h2 className="text-xl font-bold tabular-nums">{fmtDate(selection.date)}</h2>
+            <button type="button" onClick={onClose} className="text-sm text-neutral-500">閉じる</button>
           </div>
-        ) : (
-          <form onSubmit={submit}>
-            <h2 className="text-xl font-bold">{fmtDate(selection.date)}</h2>
 
-            {roomOptions.length > 1 ? (
-              <fieldset className="mt-5">
-                <legend className="mb-2 text-sm font-medium text-neutral-600">部屋</legend>
-                <div className="flex flex-wrap gap-2">
-                  {roomOptions.map((r) => {
-                    const active = r.id === room.id;
-                    return (
-                      <button key={r.id} type="button" onClick={() => onChangeRoom(r.id)}
-                        className={`flex h-12 items-center gap-2 rounded-full border px-4 font-medium transition ${
-                          active ? "border-accent bg-accent text-white shadow-md shadow-accent/25" : "border-neutral-200 text-neutral-800"}`}>
-                        <i className="size-3 rounded-full ring-2 ring-white/70" style={{ background: r.color }} />
-                        {r.name}
-                      </button>
-                    );
-                  })}
-                </div>
-              </fieldset>
-            ) : (
-              <p className="mt-2 flex items-center gap-2 text-neutral-600">
-                <i className="size-3 rounded-full" style={{ background: room.color }} />{room.name}
-              </p>
-            )}
-            {(room.description || room.capacity) && (
-              <p className="mt-3 rounded-2xl px-4 py-3 text-sm text-neutral-700" style={{ background: tint(room.color, "14") }}>
-                {room.capacity ? <span className="font-medium">定員 {room.capacity}人</span> : null}
-                {room.capacity && room.description ? "・" : null}
-                {room.description}
-              </p>
-            )}
-
+          {roomOptions.length > 1 ? (
             <fieldset className="mt-5">
-              <legend className="mb-2 text-sm font-medium text-neutral-600">
-                時間（{fmtHour(selection.start)} から）
-              </legend>
-              <div className="grid grid-cols-3 gap-2">
-                {endOptions.map((end) => {
-                  const active = end === selection.end;
+              <legend className={labelCls}>部屋</legend>
+              <div className="grid grid-cols-2 gap-px overflow-hidden rounded-sm border border-neutral-300 bg-neutral-300">
+                {roomOptions.map((r) => {
+                  const active = r.id === room.id;
                   return (
-                    <button key={end} type="button" onClick={() => onChangeEnd(end)}
-                      className={`rounded-2xl border px-2 py-3 text-center transition ${
-                        active ? "border-accent bg-accent text-white shadow-md shadow-accent/25" : "border-neutral-200 bg-white text-neutral-800"}`}>
-                      <span className="block text-lg font-bold">{end - selection.start}時間</span>
-                      <span className={`block text-xs tabular-nums ${active ? "opacity-90" : "text-neutral-500"}`}>〜{fmtHour(end)}</span>
+                    <button key={r.id} type="button" onClick={() => onChangeRoom(r.id)} aria-pressed={active}
+                      className={`flex h-12 items-center justify-center gap-2 text-[15px] ${
+                        active ? "bg-accent-soft font-semibold text-accent" : "bg-white text-neutral-800"}`}>
+                      <i className="size-2 rounded-xs" style={{ background: r.color }} />
+                      {r.name}
                     </button>
                   );
                 })}
               </div>
             </fieldset>
+          ) : (
+            <p className="mt-1 flex items-center gap-2 text-[15px] text-neutral-700">
+              <i className="size-2 rounded-xs" style={{ background: room.color }} />{room.name}
+            </p>
+          )}
+          {(room.description || room.capacity) && (
+            <p className="mt-2 text-sm text-neutral-600">
+              {room.capacity ? `定員 ${room.capacity}人` : ""}
+              {room.capacity && room.description ? "　" : ""}
+              {room.description}
+            </p>
+          )}
 
-            <label className="mt-6 block">
-              <span className="mb-2 block text-sm font-medium text-neutral-600">名前 <span className="text-red-500">*</span></span>
-              <input value={name} onChange={(e) => setName(e.target.value)} maxLength={50} autoComplete="name"
-                className="h-14 w-full rounded-2xl border border-neutral-200 bg-neutral-50 px-4 text-lg outline-none focus:border-accent focus:bg-white focus:ring-4 focus:ring-accent/15"
-                placeholder="十字 太郎" />
-            </label>
-            <label className="mt-4 block">
-              <span className="mb-2 block text-sm font-medium text-neutral-600">学校名</span>
-              <input value={school} onChange={(e) => setSchool(e.target.value)} maxLength={50}
-                className="h-14 w-full rounded-2xl border border-neutral-200 bg-neutral-50 px-4 text-lg outline-none focus:border-accent focus:bg-white focus:ring-4 focus:ring-accent/15"
-                placeholder="○○中学校" />
-            </label>
+          <fieldset className="mt-5">
+            <legend className={labelCls}>時間（{fmtHour(selection.start)} から）</legend>
+            <div className="grid grid-cols-3 gap-px overflow-hidden rounded-sm border border-neutral-300 bg-neutral-300">
+              {[1, 2, 3].map((n) => {
+                const end = selection.start + n;
+                const ok = endOptions.includes(end);
+                const active = end === selection.end;
+                return (
+                  <button key={n} type="button" disabled={!ok} onClick={() => onChangeEnd(end)} aria-pressed={active}
+                    className={`py-2.5 text-center ${
+                      active ? "bg-accent-soft text-accent" : ok ? "bg-white text-neutral-800" : "bg-neutral-50 text-neutral-300"}`}>
+                    <span className={`block text-[17px] ${active ? "font-bold" : "font-medium"}`}>{n}時間</span>
+                    <span className="block text-xs tabular-nums">〜{fmtHour(end)}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </fieldset>
 
-            {error && <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-red-700" role="alert">{error}</p>}
+          <label className="mt-5 block">
+            <span className={labelCls}>名前<span className="ml-1 text-xs font-normal text-red-600">必須</span></span>
+            <input value={name} onChange={(e) => setName(e.target.value)} maxLength={50} autoComplete="name"
+              className={input} placeholder="十字 太郎" />
+          </label>
+          <label className="mt-4 block">
+            <span className={labelCls}>学校名</span>
+            <input value={school} onChange={(e) => setSchool(e.target.value)} maxLength={50}
+              className={input} placeholder="○○中学校" />
+          </label>
 
-            <button type="submit" disabled={sending}
-              className="mt-6 h-14 w-full rounded-2xl bg-accent text-lg font-bold text-white shadow-lg shadow-accent/25 transition active:scale-[0.99] disabled:opacity-60">
-              {sending ? "予約しています…" : `${fmtHour(selection.start)}〜${fmtHour(selection.end)} を予約する`}
-            </button>
-            <button type="button" onClick={onClose} className="mt-2 h-12 w-full rounded-2xl text-neutral-500">キャンセル</button>
-          </form>
-        )}
-      </div>
+          {error && <p className="mt-4 border-l-2 border-red-600 bg-red-50 px-3 py-2 text-[15px] text-red-800" role="alert">{error}</p>}
+
+          <button type="submit" disabled={sending}
+            className="mt-6 h-12 w-full rounded-sm bg-accent text-base font-semibold text-white active:bg-[#2647a8] disabled:opacity-60">
+            {sending ? "予約しています…" : `${fmtHour(selection.start)}〜${fmtHour(selection.end)} で予約する`}
+          </button>
+        </form>
+      )}
+    </BottomSheet>
+  );
+}
+
+function Row({ k, v }: { k: string; v: string }) {
+  return (
+    <div className="flex py-3">
+      <dt className="w-16 shrink-0 text-sm text-neutral-500">{k}</dt>
+      <dd className="font-medium tabular-nums">{v}</dd>
     </div>
   );
 }

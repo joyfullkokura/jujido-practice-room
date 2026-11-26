@@ -127,32 +127,37 @@ export default function Home() {
 
   return (
     <div className="min-h-dvh bg-white" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
-      <header ref={headerRef} className="sticky top-0 z-30 border-b border-neutral-100 bg-white/95 backdrop-blur">
-        <div className="mx-auto max-w-5xl px-4 pt-4 pb-3 md:px-8">
-          <p className="text-xs font-medium tracking-wider text-neutral-400">十字堂楽器店</p>
+      <header ref={headerRef} className="sticky top-0 z-30 border-b border-neutral-200 bg-white">
+        <div className="mx-auto max-w-5xl px-4 pt-3 pb-3 md:px-8">
+          <p className="text-xs text-neutral-500">十字堂楽器店 練習室予約</p>
           <div className="mt-1 flex items-center gap-2">
-            <h1 className="mr-auto text-xl font-bold md:text-2xl">{monthLabel}</h1>
+            <h1 className="mr-auto text-xl font-bold tabular-nums md:text-2xl">{monthLabel}</h1>
             <button onClick={goToday}
-              className="h-10 rounded-full border border-neutral-200 px-4 text-sm font-medium text-neutral-700 shadow-sm active:bg-neutral-50">
+              className="h-9 rounded-sm border border-neutral-300 px-3 text-sm font-medium text-neutral-800 active:bg-neutral-100">
               今日
             </button>
-            <NavButton label={isMobile ? "前の日" : "前の週"} onClick={() => move(-1)}>‹</NavButton>
-            <NavButton label={isMobile ? "次の日" : "次の週"} onClick={() => move(1)}>›</NavButton>
+            <div className="flex">
+              <NavButton label={isMobile ? "前の日" : "前の週"} onClick={() => move(-1)} dir="prev" />
+              <NavButton label={isMobile ? "次の日" : "次の週"} onClick={() => move(1)} dir="next" />
+            </div>
           </div>
 
           {/* スマホ：週の日付を横に並べて、タップで日付を切り替え */}
           {isMobile && (
-            <div className="mt-3 grid grid-cols-7 gap-1">
+            <div className="-mb-3 mt-3 grid grid-cols-7">
               {week.map((d) => {
                 const active = d === anchor, today = d === now.date, wd = weekday(d);
                 return (
                   <button key={d} onClick={() => { setSelection(null); setAnchor(d); }}
-                    className={`flex flex-col items-center gap-0.5 rounded-2xl py-2 transition ${active ? "bg-accent text-white shadow-md shadow-accent/25" : ""}`}>
-                    <span className={`text-xs ${active ? "opacity-90" : wd === 0 ? "text-red-500" : wd === 6 ? "text-accent" : "text-neutral-500"}`}>
+                    className={`flex flex-col items-center border-b-2 pt-1 pb-2 ${active ? "border-accent" : "border-transparent"}`}>
+                    <span className={`text-xs ${wd === 0 ? "text-red-600" : wd === 6 ? "text-accent" : "text-neutral-500"}`}>
                       {WEEKDAYS[wd]}
                     </span>
-                    <span className={`text-lg font-bold leading-tight ${!active && today ? "text-accent" : ""}`}>{dayNum(d)}</span>
-                    <span className={`size-1 rounded-full ${today ? (active ? "bg-white" : "bg-accent") : "bg-transparent"}`} />
+                    <span className={`text-lg leading-tight tabular-nums ${
+                      active ? "font-bold text-accent" : today ? "font-bold text-neutral-900" : "font-medium text-neutral-700"}`}>
+                      {dayNum(d)}
+                    </span>
+                    <span className={`text-[10px] leading-none ${today ? "text-neutral-500" : "text-transparent"}`}>今日</span>
                   </button>
                 );
               })}
@@ -163,7 +168,7 @@ export default function Home() {
 
       <main className="mx-auto max-w-5xl px-2 pb-24 md:px-8">
         {rooms.length > 1 && (
-          <div className="-mx-2 flex gap-2 overflow-x-auto px-4 pt-4 pb-1 [scrollbar-width:none]">
+          <div className="-mx-2 flex overflow-x-auto border-b border-neutral-200 px-2 [scrollbar-width:none]">
             <RoomChip active={roomFilter === "all"} onClick={() => { setSelection(null); setRoomFilter("all"); }}>すべて</RoomChip>
             {rooms.map((r) => (
               <RoomChip key={r.id} active={roomFilter === r.id} color={r.color}
@@ -173,12 +178,12 @@ export default function Home() {
             ))}
           </div>
         )}
-        <p className="px-2 pt-3 text-sm text-neutral-500">
+        <p className="px-2 py-3 text-sm text-neutral-600">
           {roomFilter !== "all" && shownRooms[0]?.description ? `${shownRooms[0].description}・` : ""}
           空いている時間をタップして予約できます
         </p>
         {loadError && (
-          <p className="mx-2 mt-3 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
+          <p className="mx-2 mb-3 border-l-2 border-red-600 bg-red-50 px-3 py-2 text-sm text-red-800">
             空き状況を読み込めませんでした。通信状況を確認してください。
           </p>
         )}
@@ -212,11 +217,14 @@ export default function Home() {
   );
 }
 
-function NavButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
+function NavButton({ label, onClick, dir }: { label: string; onClick: () => void; dir: "prev" | "next" }) {
   return (
     <button aria-label={label} onClick={onClick}
-      className="flex size-10 items-center justify-center rounded-full text-2xl leading-none text-neutral-600 active:bg-neutral-100">
-      {children}
+      className={`flex size-9 items-center justify-center border border-neutral-300 text-neutral-700 active:bg-neutral-100 ${
+        dir === "prev" ? "rounded-l-sm" : "-ml-px rounded-r-sm"}`}>
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+        <path d={dir === "prev" ? "M10 3 5 8l5 5" : "M6 3l5 5-5 5"} />
+      </svg>
     </button>
   );
 }
@@ -226,9 +234,9 @@ function RoomChip({ active, color, onClick, children }: {
 }) {
   return (
     <button onClick={onClick}
-      className={`flex h-11 shrink-0 items-center gap-2 rounded-full border px-4 text-sm font-medium transition ${
-        active ? "border-accent bg-accent text-white shadow-md shadow-accent/25" : "border-neutral-200 bg-white text-neutral-700 shadow-sm"}`}>
-      {color && <i className="size-2.5 rounded-full ring-2 ring-white/70" style={{ background: color }} />}
+      className={`-mb-px flex h-12 shrink-0 items-center gap-2 border-b-2 px-3 text-sm ${
+        active ? "border-accent font-semibold text-neutral-900" : "border-transparent text-neutral-600"}`}>
+      {color && <i className="size-2 rounded-xs" style={{ background: color }} />}
       {children}
     </button>
   );
@@ -236,16 +244,16 @@ function RoomChip({ active, color, onClick, children }: {
 
 function Legend({ rooms }: { rooms: Room[] }) {
   return (
-    <div className="mt-6 flex flex-wrap gap-x-5 gap-y-2 px-2 text-xs text-neutral-500">
-      <span className="flex items-center gap-1.5"><i className="size-3 rounded border border-neutral-200 bg-white" />空き</span>
+    <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 px-2 text-xs text-neutral-600">
+      <span className="flex items-center gap-1.5"><i className="size-2.5 rounded-xs border border-neutral-300 bg-white" />空き</span>
       {rooms.map((r) => (
         <span key={r.id} className="flex items-center gap-1.5">
-          <i className="size-3 rounded border-l-4" style={{ borderLeftColor: r.color, background: r.color + "1f" }} />
+          <i className="size-2.5 rounded-xs border-l-2" style={{ borderLeftColor: r.color, background: r.color + "1a" }} />
           {rooms.length > 1 ? `${r.name} 予約済` : "予約済"}
         </span>
       ))}
-      <span className="flex items-center gap-1.5"><i className="size-3 rounded bg-neutral-100" />受付終了</span>
-      <span className="flex items-center gap-1.5"><i className="h-0.5 w-3 bg-red-500" />現在時刻</span>
+      <span className="flex items-center gap-1.5"><i className="size-2.5 rounded-xs bg-neutral-100" />受付終了</span>
+      <span className="flex items-center gap-1.5"><i className="h-px w-3 bg-red-600" />現在時刻</span>
     </div>
   );
 }
