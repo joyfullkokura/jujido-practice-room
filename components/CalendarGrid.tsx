@@ -1,12 +1,16 @@
 "use client";
-import { HOURS, OPEN_HOUR, CLOSE_HOUR, type Block, type Selection } from "@/lib/types";
+import { HOURS, OPEN_HOUR, CLOSE_HOUR, tint, type Block, type Room, type Selection } from "@/lib/types";
 import { WEEKDAYS, dayNum, weekday, isPast, fmtHour } from "@/lib/date";
 
 type Props = {
   days: string[];
   blocks: Block[];
+  /** 表示中の部屋（「すべて」なら全部屋） */
+  rooms: Room[];
   selection: Selection | null;
   now: { date: string; hour: number };
+  /** 表示中の部屋がすべて埋まっているか */
+  isFull: (date: string, hour: number) => boolean;
   onPick: (date: string, hour: number) => void;
 };
 
@@ -15,7 +19,7 @@ const ROW = "[--row:4rem] md:[--row:3.5rem]";
 const at = (h: number) => `calc(var(--row) * ${h - OPEN_HOUR})`;
 const span = (n: number) => `calc(var(--row) * ${n})`;
 
-export default function CalendarGrid({ days, blocks, selection, now, onPick }: Props) {
+export default function CalendarGrid({ days, blocks, rooms, selection, now, isFull, onPick }: Props) {
   const multi = days.length > 1;
   const cols = { gridTemplateColumns: `3.25rem repeat(${days.length}, minmax(0, 1fr))` };
 
@@ -54,7 +58,7 @@ export default function CalendarGrid({ days, blocks, selection, now, onPick }: P
         </div>
 
         {days.map((d) => (
-          <DayColumn key={d} date={d} multi={multi} now={now} onPick={onPick}
+          <DayColumn key={d} date={d} multi={multi} now={now} rooms={rooms} isFull={isFull} onPick={onPick}
             blocks={blocks.filter((b) => b.date === d)}
             selection={selection?.date === d ? selection : null} />
         ))}
@@ -63,26 +67,34 @@ export default function CalendarGrid({ days, blocks, selection, now, onPick }: P
   );
 }
 
-function DayColumn({ date, multi, blocks, selection, now, onPick }: {
-  date: string; multi: boolean; blocks: Block[]; selection: Selection | null;
-  now: { date: string; hour: number }; onPick: (date: string, hour: number) => void;
+function DayColumn({ date, multi, blocks, rooms, selection, now, isFull, onPick }: {
+  date: string; multi: boolean; blocks: Block[]; rooms: Room[]; selection: Selection | null;
+  now: { date: string; hour: number }; isFull: (date: string, hour: number) => boolean;
+  onPick: (date: string, hour: number) => void;
 }) {
-  const booked = (h: number) => blocks.some((b) => h >= b.start && h < b.end);
   const showNow = date === now.date && now.hour >= OPEN_HOUR && now.hour <= CLOSE_HOUR;
+  // 複数の部屋を表示するときは、部屋ごとに縦のレーンに分けて並べる
+  const lanes = rooms.length;
+  const lane = (roomId: number) => {
+    if (lanes <= 1) return { left: "4px", width: "calc(100% - 8px)" };
+    const i = Math.max(0, rooms.findIndex((r) => r.id === roomId));
+    return { left: `calc(${i} * 100% / ${lanes} + 2px)`, width: `calc(100% / ${lanes} - 4px)` };
+  };
+  const roomOf = (id: number) => rooms.find((r) => r.id === id);
 
   return (
     <div className={`relative ${multi ? "border-l border-neutral-100" : ""}`} style={{ height: span(CLOSE_HOUR - OPEN_HOUR) }}>
       {/* 1時間ごとの枠（押せる場所） */}
       {HOURS.map((h) => {
         const past = isPast(date, h, now);
-        const taken = booked(h);
+        const full = isFull(date, h);
         return (
           <button
             key={h}
             type="button"
-            disabled={past || taken}
+            disabled={past || full}
             onClick={() => onPick(date, h)}
-            aria-label={`${date} ${fmtHour(h)} ${past ? "受付終了" : taken ? "予約済" : "空き"}`}
+            aria-label={`${date} ${fmtHour(h)} ${past ? "受付終了" : full ? "予約済" : "空き"}`}
             className={`absolute inset-x-0 border-t border-neutral-100 transition-colors ${
               past ? "cursor-not-allowed bg-neutral-100/80" : "hover:bg-accent-soft active:bg-accent-soft"}`}
             style={{ top: at(h), height: span(1) }}
@@ -91,20 +103,25 @@ function DayColumn({ date, multi, blocks, selection, now, onPick }: {
       })}
       <div className="pointer-events-none absolute inset-x-0 border-t border-neutral-100" style={{ top: at(CLOSE_HOUR) }} />
 
-      {/* 予約済みブロック */}
-      {blocks.map((b) => (
-        <div key={`${b.room_id}-${b.start}`}
-          className="pointer-events-none absolute inset-x-1 overflow-hidden rounded-xl border-l-4 border-accent bg-accent-soft px-2 py-1.5 shadow-sm"
-          style={{ top: `calc(${at(b.start)} + 2px)`, height: `calc(${span(b.end - b.start)} - 4px)` }}>
-          <p className="truncate text-sm font-bold text-accent">予約済</p>
-          <p className="truncate text-xs text-accent/80 tabular-nums">{fmtHour(b.start)}–{fmtHour(b.end)}</p>
-        </div>
-      ))}
+      {/* 予約済みブロック（部屋の色） */}
+      {blocks.map((b) => {
+        const room = roomOf(b.room_id);
+        const color = room?.color ?? "#868e96";
+        return (
+          <div key={`${b.room_id}-${b.start}`}
+            className="pointer-events-none absolute overflow-hidden rounded-xl border-l-4 px-2 py-1.5 shadow-sm"
+            style={{ ...lane(b.room_id), top: `calc(${at(b.start)} + 2px)`, height: `calc(${span(b.end - b.start)} - 4px)`,
+              background: tint(color), borderLeftColor: color, color }}>
+            <p className="truncate text-sm font-bold">{lanes > 1 ? room?.name.replace(/^.*練習室/, "") || "予約済" : "予約済"}</p>
+            <p className="truncate text-xs tabular-nums opacity-80">{fmtHour(b.start)}–{fmtHour(b.end)}</p>
+          </div>
+        );
+      })}
 
       {/* 選択中の枠 */}
       {selection && (
-        <div className="pointer-events-none absolute inset-x-1 z-10 rounded-xl bg-accent px-2 py-1.5 text-white shadow-lg shadow-accent/30"
-          style={{ top: `calc(${at(selection.start)} + 2px)`, height: `calc(${span(selection.end - selection.start)} - 4px)` }}>
+        <div className="pointer-events-none absolute z-10 rounded-xl bg-accent px-2 py-1.5 text-white shadow-lg shadow-accent/30"
+          style={{ ...lane(selection.roomId), top: `calc(${at(selection.start)} + 2px)`, height: `calc(${span(selection.end - selection.start)} - 4px)` }}>
           <p className="truncate text-sm font-bold">選択中</p>
           <p className="truncate text-xs tabular-nums opacity-90">{fmtHour(selection.start)}–{fmtHour(selection.end)}</p>
         </div>

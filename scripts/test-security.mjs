@@ -39,6 +39,20 @@ check("営業時間外(8時)は拒否", r.error?.code === "P0001", desc(r));
 r = await rpc(16, 17, { p_name: "   " });
 check("名前が空なら拒否", r.error?.code === "P0001", desc(r));
 
+console.log("--- 部屋（フェーズ2）");
+const rooms = (await sb.from("rooms").select("id, name, is_public").order("sort_order")).data ?? [];
+check("部屋が2つ以上取得できる", rooms.length >= 2, rooms.map((x) => x.name).join(" / "));
+check("anon に見える部屋はすべて公開中", rooms.every((x) => x.is_public === true));
+const other = rooms.find((x) => x.id !== ROOM);
+if (other) {
+  r = await sb.rpc("create_reservation", { p_room_id: other.id, p_date: date, p_start_hour: 13, p_end_hour: 15, p_name: "__TEST__" });
+  check("別の部屋なら同じ時間でも予約できる（重複判定は部屋ごと）", !r.error, desc(r));
+  r = await sb.rpc("create_reservation", { p_room_id: other.id, p_date: date, p_start_hour: 14, p_end_hour: 15, p_name: "__TEST__" });
+  check("その別の部屋でも二重予約は 23505 エラー", r.error?.code === "23505", desc(r));
+}
+r = await sb.rpc("create_reservation", { p_room_id: 999999, p_date: date, p_start_hour: 16, p_end_hour: 17, p_name: "__TEST__" });
+check("存在しない部屋は予約できない", r.error?.code === "P0001", desc(r));
+
 console.log("--- 個人情報が読めないこと");
 r = await sb.from("reservations").select("name, school, source");
 check("reservations の名前・学校名は読めない", denied(r), desc(r));

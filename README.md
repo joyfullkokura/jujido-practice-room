@@ -5,6 +5,7 @@ Next.js 16 (App Router) + Supabase + Tailwind CSS。本番: https://jujido-pract
 ## DB（Supabase の SQL Editor で、上から順に1回ずつ実行）
 1. `supabase/schema.sql`（初回のみ）
 2. `supabase/migrations/001_multi_slot.sql` … 連続枠の予約（予約は関数 `create_reservation` 経由のみ）
+3. `supabase/migrations/002_rooms.sql` … 複数の部屋（色・定員・説明・並び順・公開/非公開）
 
 ## ローカル開発
 1. `.env.local` に `NEXT_PUBLIC_SUPABASE_URL` と `NEXT_PUBLIC_SUPABASE_KEY`（publishable key）

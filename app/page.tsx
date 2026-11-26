@@ -2,12 +2,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { supabase } from "@/lib/supabase";
 import { addDays, dayNum, isPast, monthNum, nowJST, weekOf, weekday, yearNum, WEEKDAYS } from "@/lib/date";
-import { CLOSE_HOUR, MAX_HOURS, toBlocks, type Selection, type Slot } from "@/lib/types";
+import { CLOSE_HOUR, MAX_HOURS, toBlocks, type Room, type Selection, type Slot } from "@/lib/types";
 import CalendarGrid from "@/components/CalendarGrid";
 import BookingSheet from "@/components/BookingSheet";
 
-const ROOM_ID = 1;
-const ROOM_NAME = "2階 練習室";
 
 /** 幅768px未満ならスマホ（1日表示） */
 function useIsMobile() {
@@ -22,6 +20,8 @@ export default function Home() {
   const isMobile = useIsMobile();
   const [now, setNow] = useState<{ date: string; hour: number } | null>(null);
   const [anchor, setAnchor] = useState<string | null>(null);
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [roomFilter, setRoomFilter] = useState<number | "all">("all");
   const [slots, setSlots] = useState<Slot[]>([]);
   const [loadError, setLoadError] = useState(false);
   const [selection, setSelection] = useState<Selection | null>(null);
@@ -51,11 +51,21 @@ export default function Home() {
   const days = useMemo(() => (anchor ? (isMobile ? [anchor] : week) : []), [anchor, isMobile, week]);
   const from = days[0], to = days[days.length - 1];
 
+  // 部屋の一覧（公開中のものだけが返る）
+  useEffect(() => {
+    supabase.from("rooms").select("id, name, color, capacity, description, sort_order")
+      .order("sort_order").order("id")
+      .then(({ data, error }) => { if (error) setLoadError(true); else setRooms(data ?? []); });
+  }, []);
+
+  const shownRooms = useMemo(
+    () => (roomFilter === "all" ? rooms : rooms.filter((r) => r.id === roomFilter)), [rooms, roomFilter]);
+
   const load = useCallback(async () => {
     if (!from || !to) return;
     const { data, error } = await supabase.from("booked_slots")
       .select("room_id, date, start_hour, group_id")
-      .eq("room_id", ROOM_ID).gte("date", from).lte("date", to);
+      .gte("date", from).lte("date", to);
     setLoadError(!!error);
     if (!error) setSlots(data ?? []);
   }, [from, to]);
@@ -68,15 +78,22 @@ export default function Home() {
     return () => document.removeEventListener("visibilitychange", f);
   }, [load]);
 
-  const blocks = useMemo(() => toBlocks(slots), [slots]);
-  const isBooked = useCallback((date: string, h: number) =>
-    blocks.some((b) => b.date === date && h >= b.start && h < b.end), [blocks]);
+  const blocks = useMemo(() => {
+    const ids = new Set(shownRooms.map((r) => r.id));
+    return toBlocks(slots.filter((s) => ids.has(s.room_id)));
+  }, [slots, shownRooms]);
+  const isBooked = useCallback((roomId: number, date: string, h: number) =>
+    slots.some((s) => s.room_id === roomId && s.date === date && s.start_hour === h), [slots]);
+  /** その時間に空いている部屋（表示中の部屋のうち） */
+  const freeRooms = useCallback((date: string, h: number) =>
+    shownRooms.filter((r) => !isBooked(r.id, date, h)), [shownRooms, isBooked]);
+  const isFull = useCallback((date: string, h: number) => freeRooms(date, h).length === 0, [freeRooms]);
 
   /** 開始時刻から連続して空いている終了時刻の候補 */
-  const endOptions = useCallback((date: string, start: number) => {
+  const endOptions = useCallback((roomId: number, date: string, start: number) => {
     const out: number[] = [];
     for (let end = start + 1; end <= Math.min(start + MAX_HOURS, CLOSE_HOUR); end++) {
-      if (isBooked(date, end - 1)) break;
+      if (isBooked(roomId, date, end - 1)) break;
       out.push(end);
     }
     return out;
@@ -99,6 +116,8 @@ export default function Home() {
   };
 
   if (!now || !anchor) return <div className="min-h-dvh bg-white" />;
+
+  const selectedRoom = selection ? rooms.find((r) => r.id === selection.roomId) : undefined;
 
   const monthLabel = (() => {
     const a = days[0], b = days[days.length - 1];
@@ -143,28 +162,48 @@ export default function Home() {
       </header>
 
       <main className="mx-auto max-w-5xl px-2 pb-24 md:px-8">
-        <p className="px-2 pt-4 text-sm text-neutral-500">
-          {ROOM_NAME}・空いている時間をタップして予約できます
+        {rooms.length > 1 && (
+          <div className="-mx-2 flex gap-2 overflow-x-auto px-4 pt-4 pb-1 [scrollbar-width:none]">
+            <RoomChip active={roomFilter === "all"} onClick={() => { setSelection(null); setRoomFilter("all"); }}>すべて</RoomChip>
+            {rooms.map((r) => (
+              <RoomChip key={r.id} active={roomFilter === r.id} color={r.color}
+                onClick={() => { setSelection(null); setRoomFilter(r.id); }}>
+                {r.name}
+              </RoomChip>
+            ))}
+          </div>
+        )}
+        <p className="px-2 pt-3 text-sm text-neutral-500">
+          {roomFilter !== "all" && shownRooms[0]?.description ? `${shownRooms[0].description}・` : ""}
+          空いている時間をタップして予約できます
         </p>
         {loadError && (
           <p className="mx-2 mt-3 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
             空き状況を読み込めませんでした。通信状況を確認してください。
           </p>
         )}
-        <CalendarGrid days={days} blocks={blocks} selection={selection} now={now}
+        <CalendarGrid days={days} blocks={blocks} rooms={shownRooms} selection={selection} now={now} isFull={isFull}
           onPick={(date, h) => {
-            if (isPast(date, h, now) || isBooked(date, h)) return;
-            setSelection({ date, start: h, end: h + 1 });
+            const free = freeRooms(date, h);
+            if (isPast(date, h, now) || free.length === 0) return;
+            setSelection({ date, start: h, end: h + 1, roomId: free[0].id });
           }} />
-        <Legend />
+        <Legend rooms={shownRooms} />
       </main>
 
-      {selection && (
+      {selection && selectedRoom && (
         <BookingSheet
           selection={selection}
-          endOptions={endOptions(selection.date, selection.start)}
-          roomId={ROOM_ID} roomName={ROOM_NAME} source={source.current}
+          endOptions={endOptions(selection.roomId, selection.date, selection.start)}
+          room={selectedRoom}
+          roomOptions={freeRooms(selection.date, selection.start)}
+          source={source.current}
           onChangeEnd={(end) => setSelection({ ...selection, end })}
+          onChangeRoom={(roomId) => {
+            // 部屋を変えたら、その部屋で取れる長さに合わせる
+            const ends = endOptions(roomId, selection.date, selection.start);
+            setSelection({ ...selection, roomId, end: Math.min(selection.end, ends[ends.length - 1] ?? selection.start + 1) });
+          }}
           onClose={() => setSelection(null)}
           onBooked={load}
         />
@@ -182,11 +221,29 @@ function NavButton({ label, onClick, children }: { label: string; onClick: () =>
   );
 }
 
-function Legend() {
+function RoomChip({ active, color, onClick, children }: {
+  active: boolean; color?: string; onClick: () => void; children: React.ReactNode;
+}) {
+  return (
+    <button onClick={onClick}
+      className={`flex h-11 shrink-0 items-center gap-2 rounded-full border px-4 text-sm font-medium transition ${
+        active ? "border-accent bg-accent text-white shadow-md shadow-accent/25" : "border-neutral-200 bg-white text-neutral-700 shadow-sm"}`}>
+      {color && <i className="size-2.5 rounded-full ring-2 ring-white/70" style={{ background: color }} />}
+      {children}
+    </button>
+  );
+}
+
+function Legend({ rooms }: { rooms: Room[] }) {
   return (
     <div className="mt-6 flex flex-wrap gap-x-5 gap-y-2 px-2 text-xs text-neutral-500">
       <span className="flex items-center gap-1.5"><i className="size-3 rounded border border-neutral-200 bg-white" />空き</span>
-      <span className="flex items-center gap-1.5"><i className="size-3 rounded border-l-4 border-accent bg-accent-soft" />予約済</span>
+      {rooms.map((r) => (
+        <span key={r.id} className="flex items-center gap-1.5">
+          <i className="size-3 rounded border-l-4" style={{ borderLeftColor: r.color, background: r.color + "1f" }} />
+          {rooms.length > 1 ? `${r.name} 予約済` : "予約済"}
+        </span>
+      ))}
       <span className="flex items-center gap-1.5"><i className="size-3 rounded bg-neutral-100" />受付終了</span>
       <span className="flex items-center gap-1.5"><i className="h-0.5 w-3 bg-red-500" />現在時刻</span>
     </div>

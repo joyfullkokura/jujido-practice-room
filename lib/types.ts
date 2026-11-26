@@ -9,7 +9,16 @@ export type Slot = { room_id: number; date: string; start_hour: number; group_id
 /** グリッドに描く1ブロック（連続した枠をまとめたもの） */
 export type Block = { room_id: number; date: string; start: number; end: number };
 
-export type Selection = { date: string; start: number; end: number };
+export type Selection = { date: string; start: number; end: number; roomId: number };
+
+/** rooms テーブル（一般向けには公開中の部屋だけが返る） */
+export type Room = {
+  id: number; name: string; color: string;
+  capacity: number | null; description: string | null; sort_order: number;
+};
+
+/** 部屋の色を薄くした背景色（#rrggbb + 透明度） */
+export const tint = (hex: string, alpha = "1f") => hex + alpha;
 
 /** 同じ group_id で連続している枠を1ブロックにまとめる */
 export function toBlocks(slots: Slot[]): Block[] {

@@ -2,26 +2,28 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { fmtDate, fmtHour } from "@/lib/date";
-import type { Selection } from "@/lib/types";
+import { tint, type Room, type Selection } from "@/lib/types";
 
 type Props = {
   selection: Selection;
   /** 開始時刻から選べる終了時刻（例：[16, 17, 18]） */
   endOptions: number[];
-  roomId: number;
-  roomName: string;
+  room: Room;
+  /** この開始時刻で空いている部屋（2つ以上あれば選べる） */
+  roomOptions: Room[];
   source: string | null;
   onChangeEnd: (end: number) => void;
+  onChangeRoom: (roomId: number) => void;
   onClose: () => void;
   onBooked: () => void;
 };
 
-export default function BookingSheet({ selection, endOptions, roomId, roomName, source, onChangeEnd, onClose, onBooked }: Props) {
+export default function BookingSheet({ selection, endOptions, room, roomOptions, source, onChangeEnd, onChangeRoom, onClose, onBooked }: Props) {
   const [name, setName] = useState("");
   const [school, setSchool] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
-  const [done, setDone] = useState<Selection | null>(null);
+  const [done, setDone] = useState<{ sel: Selection; room: Room } | null>(null);
 
   // シートが開いている間は背景をスクロールさせない
   useEffect(() => {
@@ -30,7 +32,7 @@ export default function BookingSheet({ selection, endOptions, roomId, roomName, 
     return () => { document.body.style.overflow = prev; };
   }, []);
 
-  useEffect(() => setError(""), [selection.date, selection.start, selection.end]);
+  useEffect(() => setError(""), [selection.date, selection.start, selection.end, selection.roomId]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -38,12 +40,12 @@ export default function BookingSheet({ selection, endOptions, roomId, roomName, 
     setSending(true);
     setError("");
     const { error } = await supabase.rpc("create_reservation", {
-      p_room_id: roomId, p_date: selection.date,
+      p_room_id: selection.roomId, p_date: selection.date,
       p_start_hour: selection.start, p_end_hour: selection.end,
       p_name: name, p_school: school, p_source: source,
     });
     setSending(false);
-    if (!error) { setDone(selection); onBooked(); return; }
+    if (!error) { setDone({ sel: selection, room }); onBooked(); return; }
     if (error.code === "23505") setError("選んだ時間に、ちょうど別の予約が入りました。別の時間を選んでください。");
     else if (error.code === "23514") setError("名前と学校名は50文字以内で入力してください。");
     else if (error.code === "P0001") setError(error.message);
@@ -62,14 +64,43 @@ export default function BookingSheet({ selection, endOptions, roomId, roomName, 
           <div className="py-4 text-center">
             <div className="mx-auto mb-4 flex size-16 items-center justify-center rounded-full bg-accent-soft text-3xl text-accent">✓</div>
             <h2 className="text-xl font-bold">予約が完了しました</h2>
-            <p className="mt-3 text-lg">{timeLabel(done)}</p>
-            <p className="mt-1 text-neutral-500">{roomName}</p>
+            <p className="mt-3 text-lg">{timeLabel(done.sel)}</p>
+            <p className="mt-1 text-neutral-500">{done.room.name}</p>
             <button onClick={onClose} className="mt-8 h-14 w-full rounded-2xl bg-accent text-lg font-bold text-white">閉じる</button>
           </div>
         ) : (
           <form onSubmit={submit}>
-            <p className="text-sm text-neutral-500">{roomName}</p>
-            <h2 className="mt-1 text-xl font-bold">{fmtDate(selection.date)}</h2>
+            <h2 className="text-xl font-bold">{fmtDate(selection.date)}</h2>
+
+            {roomOptions.length > 1 ? (
+              <fieldset className="mt-5">
+                <legend className="mb-2 text-sm font-medium text-neutral-600">部屋</legend>
+                <div className="flex flex-wrap gap-2">
+                  {roomOptions.map((r) => {
+                    const active = r.id === room.id;
+                    return (
+                      <button key={r.id} type="button" onClick={() => onChangeRoom(r.id)}
+                        className={`flex h-12 items-center gap-2 rounded-full border px-4 font-medium transition ${
+                          active ? "border-accent bg-accent text-white shadow-md shadow-accent/25" : "border-neutral-200 text-neutral-800"}`}>
+                        <i className="size-3 rounded-full ring-2 ring-white/70" style={{ background: r.color }} />
+                        {r.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </fieldset>
+            ) : (
+              <p className="mt-2 flex items-center gap-2 text-neutral-600">
+                <i className="size-3 rounded-full" style={{ background: room.color }} />{room.name}
+              </p>
+            )}
+            {(room.description || room.capacity) && (
+              <p className="mt-3 rounded-2xl px-4 py-3 text-sm text-neutral-700" style={{ background: tint(room.color, "14") }}>
+                {room.capacity ? <span className="font-medium">定員 {room.capacity}人</span> : null}
+                {room.capacity && room.description ? "・" : null}
+                {room.description}
+              </p>
+            )}
 
             <fieldset className="mt-5">
               <legend className="mb-2 text-sm font-medium text-neutral-600">
