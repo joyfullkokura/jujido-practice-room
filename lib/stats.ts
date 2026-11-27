@@ -3,9 +3,9 @@
 import { addDays, fromISO, weekday } from "./date";
 import { DEFAULT_CLOSE, DEFAULT_OPEN } from "./types";
 
-/** 稼働率の分母にする時間帯（試作どおり 9:00〜21:00 の12時間） */
+/** 稼働率の分母にする時間帯の既定値（試作どおり 9:00〜21:00。設定 shop_settings で変更できる） */
 export const WINDOW = { open: 9 * 60, close: 21 * 60 };
-export const HEAT_HOURS = Array.from({ length: (WINDOW.close - WINDOW.open) / 60 }, (_, i) => WINDOW.open / 60 + i);
+export const heatHoursOf = (w: { open: number; close: number }) => Array.from({ length: Math.max(0, Math.ceil((w.close - w.open) / 60)) }, (_, i) => Math.floor(w.open / 60) + i);
 
 type Row = {
   id: number; room_id: number; start_at: string; end_at: string; status: string; deleted_at?: string | null;
@@ -21,8 +21,8 @@ export type MonthStats = {
   total: Omit<RoomStat, "roomId">;
   /** 区分ごとの利用時間（分）。メンテナンスは含まない */
   catMin: Record<string, number>;
-  /** heat[曜日][時] = 利用分 。heatDays[曜日] = その曜日の営業日数 */
-  heat: number[][]; heatDays: number[];
+  /** heat[曜日][時] = 利用分 。heatDays[曜日] = その曜日の営業日数。heatHours = 列の時（9, 10, …） */
+  heat: number[][]; heatDays: number[]; heatHours: number[];
   revenue: { total: number; paid: number; unpaid: number; count: number };
   sources: [string, number][]; schools: [string, number][];
 };
@@ -54,8 +54,10 @@ function clip(startISO: string, endISO: string, date: string): [number, number] 
 
 export const sourceName = (s: string | null) => (s === "admin" ? "電話・店頭（管理者）" : s || "（なし）");
 
-export function monthStats(p: { month: string; rows: Row[]; roomIds: number[]; hours: HoursRow[] | null; closures: ClosureRow[] }): MonthStats {
-  const W = WINDOW;
+export function monthStats(p: { month: string; rows: Row[]; roomIds: number[]; hours: HoursRow[] | null; closures: ClosureRow[];
+  window?: { open: number; close: number } }): MonthStats {
+  const W = p.window ?? WINDOW;
+  const HEAT_HOURS = heatHoursOf(W);
   const days = monthDays(p.month).filter((d) => hoursFor(p.hours, d));
   const daySet = new Set(days);
   const rs = new Map<number, RoomStat>(p.roomIds.map((id) => [id, { roomId: id, avail: 0, availIn: 0, planned: 0, plannedIn: 0, actual: 0, revenue: 0 }]));
@@ -113,7 +115,7 @@ export function monthStats(p: { month: string; rows: Row[]; roomIds: number[]; h
     plannedIn: t.plannedIn + x.plannedIn, actual: t.actual + x.actual, revenue: t.revenue + x.revenue }),
     { avail: 0, availIn: 0, planned: 0, plannedIn: 0, actual: 0, revenue: 0 });
   const sorted = (m: Map<string, number>) => [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "ja"));
-  return { days, rooms, total, catMin, heat, heatDays, revenue, sources: sorted(src), schools: sorted(sch) };
+  return { days, rooms, total, catMin, heat, heatDays, heatHours: HEAT_HOURS, revenue, sources: sorted(src), schools: sorted(sch) };
 }
 
 /** 割合（0〜1）。分母 0 は null */

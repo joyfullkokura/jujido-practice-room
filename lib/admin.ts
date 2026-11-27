@@ -58,6 +58,14 @@ export async function quotePrice(p: { category: string; room_id: number; start_a
   return error ? null : ((data as Quote[])?.[0] ?? null);
 }
 
+/** 集計・予約表の時間帯（設定。migration 008 の前や読めないときは 9:00〜21:00） */
+export async function fetchWindow(): Promise<{ open: number; close: number }> {
+  const { data } = await supabase.from("shop_settings").select("analysis_open, analysis_close").eq("id", 1).maybeSingle();
+  const m = (t?: string) => (t ? Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5)) : null);
+  const open = m(data?.analysis_open), close = m(data?.analysis_close);
+  return open != null && close != null && close > open ? { open, close } : { open: 9 * 60, close: 21 * 60 };
+}
+
 export const yen = (n: number) => `¥${Math.round(n).toLocaleString("ja-JP")}`;
 
 /** DB のエラーを、店頭で読んでわかる文に */

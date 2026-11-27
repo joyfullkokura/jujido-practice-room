@@ -65,6 +65,16 @@ const series = (b) => {
   }
   return out;
 };
+export const SHOP = { analysis_open: "09:00:00", analysis_close: "21:00:00" };
+const A = (id, at, kind, email, table_name, row_id, action, before, after) => ({ id, at: t(at), actor_kind: kind, actor_email: email, table_name, row_id, action, before, after });
+export const AUDIT = [
+  A(5, "10:05", "admin", "admin@example.com", "reservations", "8", "update", { status: "confirmed", cancelled_at: null }, { status: "cancelled", cancelled_at: t("10:05") }),
+  A(4, "09:40", "public", null, "reservations", "1", "insert", null,
+    { id: 1, room_id: 1, start_at: t("11:00"), end_at: t("12:30"), name: "山田 太郎", school: "○○中学校", category: "rental", status: "tentative", people: 1, payment: "unpaid", extras: [], discount: 0, price_total: 1650, source: "○○中" }),
+  A(3, "09:30", "admin", "admin@example.com", "price_settings", "1", "update", { tax_rate: 8 }, { tax_rate: 10 }),
+  A(2, "09:20", "admin", "admin@example.com", "business_hours", "0", "update", { is_closed: false }, { is_closed: true }),
+  A(1, "09:00", "system", null, "rooms", "3", "insert", null, { id: 3, name: "L-1", capacity: 4, is_public: false, instruments: "アップライトピアノ" }),
+];
 export const CLOSURES = [{ id: 1, room_id: null, start_at: t("20:00"), end_at: t("21:00"), reason: "店の都合" }];
 
 /** ログイン済みの管理者として /admin を開く */
@@ -78,6 +88,8 @@ export async function openAdmin(page, url, { rooms = ROOMS, reservations = RESER
     instruments: x.instruments, capacity: x.capacity, is_hall: x.is_hall, is_public: x.is_public, total: quote(rooms, { p_category: "rental", p_room_id: x.id,
       p_start_at: t("10:00"), p_end_at: t("11:00"), p_people: 1 })[0].total })) }));
   await page.route(/\/rest\/v1\/hall_extras/, (r) => r.fulfill({ json: EXTRAS }));
+  await page.route(/\/rest\/v1\/shop_settings/, (r) => r.request().method() === "GET" ? r.fulfill({ json: SHOP }) : r.fulfill({ status: 204 }));
+  await page.route(/\/rest\/v1\/audit_log/, (r) => r.fulfill({ json: AUDIT }));
   await page.route(/\/rest\/v1\/price_settings/, (r) => r.fulfill({ json: SETTINGS }));
   await page.route(/\/rest\/v1\/rooms/, (r) => r.fulfill({ json: rooms }));
   await page.route(/\/rest\/v1\/reservations/, (r) => r.request().method() === "GET" ? r.fulfill({ json: reservations }) : r.fulfill({ status: 201, json: [] }));

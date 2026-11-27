@@ -4,14 +4,12 @@ import { supabase } from "@/lib/supabase";
 import { addDays, fmtDate, nowJST } from "@/lib/date";
 import { CATEGORIES, CATEGORY_KEYS, isActive } from "@/lib/booking";
 import { useShopCalendar } from "@/lib/useShopCalendar";
-import { describe, explain, fetchReservations, type ReservationRow, type RoomRow } from "@/lib/admin";
+import { describe, explain, fetchReservations, fetchWindow, type ReservationRow, type RoomRow } from "@/lib/admin";
 import Timeline, { type TLRow } from "@/components/admin/Timeline";
 import BookingEditor, { draftOf, newDraft, type Draft } from "@/components/admin/BookingEditor";
 import { Button, Notice, inputCls } from "@/components/ui";
 import type { SearchPick } from "@/components/admin/SearchTab";
 
-/** 管理画面の予約表は 9:00〜21:00 を基本に、営業時間がそれより広ければ広げる */
-const BASE = { open: 9 * 60, close: 21 * 60 };
 
 export default function DayTab({ rooms, staff, pick, onPickUsed }: {
   rooms: RoomRow[]; staff: string;
@@ -25,7 +23,10 @@ export default function DayTab({ rooms, staff, pick, onPickUsed }: {
   const [reloadKey, setReloadKey] = useState(0);
   const [editing, setEditing] = useState<Draft | null>(null);
   const { hoursOf, closedOf, range: shopRange } = useShopCalendar(date, date, reloadKey);
-  const range = { open: Math.min(BASE.open, shopRange.open), close: Math.max(BASE.close, shopRange.close) };
+  // 予約表の時間帯：設定（既定 9:00〜21:00）を基本に、営業時間がそれより広ければ広げる
+  const [base, setBase] = useState({ open: 9 * 60, close: 21 * 60 });
+  useEffect(() => { fetchWindow().then(setBase); }, []);
+  const range = { open: Math.min(base.open, shopRange.open), close: Math.max(base.close, shopRange.close) };
 
   useEffect(() => { const t = setInterval(() => setNow(nowJST()), 30_000); return () => clearInterval(t); }, []);
   useEffect(() => {

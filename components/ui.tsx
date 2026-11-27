@@ -48,11 +48,11 @@ export function SectionTitle({ children, right }: { children: React.ReactNode; r
 }
 
 /** 15分刻みの時刻リスト */
-export function TimeSelect({ value, onChange, from = 0, to = 24 * 60, label, disabled }: {
-  value: number; onChange: (m: number) => void; from?: number; to?: number; label: string; disabled?: boolean;
+export function TimeSelect({ value, onChange, from = 0, to = 24 * 60, step = 15, label, disabled }: {
+  value: number; onChange: (m: number) => void; from?: number; to?: number; step?: number; label: string; disabled?: boolean;
 }) {
   const opts: number[] = [];
-  for (let m = from; m <= to; m += 15) opts.push(m);
+  for (let m = from; m <= to; m += step) opts.push(m);
   return (
     <select aria-label={label} value={value} disabled={disabled} onChange={(e) => onChange(Number(e.target.value))}
       className={`${inputCls} tabular-nums`}>

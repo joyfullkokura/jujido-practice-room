@@ -44,7 +44,8 @@ for (const [name, opts] of [["pc", { viewport: { width: 1366, height: 900 } }], 
   await page.getByRole("button", { name: "検索", exact: true }).click();
   await page.waitForTimeout(500);
   await page.screenshot({ path: `${out}/${name}-7-search.png`, fullPage: true });
-  await page.getByRole("button", { name: "料金", exact: true }).click();
+  await page.getByRole("button", { name: "設定", exact: true }).click();
+  await page.getByRole("button", { name: "料金・楽器", exact: true }).click();
   await page.waitForTimeout(500);
   await page.screenshot({ path: `${out}/${name}-8-prices.png`, fullPage: true });
   for (const [tab, file] of [["ダッシュボード", "9-dashboard"], ["売上", "10-sales"], ["レポート", "11-report"]]) {
@@ -55,10 +56,14 @@ for (const [name, opts] of [["pc", { viewport: { width: 1366, height: 900 } }], 
   await page.emulateMedia({ media: "print" });
   await page.screenshot({ path: `${out}/${name}-12-report-print.png`, fullPage: true });
   await page.emulateMedia({ media: "screen" });
-  for (const [tab, file] of [["一覧・CSV", "3-list"], ["部屋", "4-rooms"]]) {
-    await page.getByRole("button", { name: tab, exact: true }).click();
+  await page.getByRole("button", { name: "一覧・CSV", exact: true }).click();
+  await page.waitForTimeout(600);
+  await page.screenshot({ path: `${out}/${name}-3-list.png`, fullPage: true });
+  await page.getByRole("button", { name: "設定", exact: true }).click();
+  for (const [sub, file] of [["教室", "4-rooms"], ["営業時間・休業日", "13-hours"], ["変更履歴", "14-history"]]) {
+    await page.getByRole("button", { name: sub, exact: true }).click();
     await page.waitForTimeout(600);
-    if (tab === "部屋") { await page.getByRole("button", { name: "編集" }).nth(4).click(); await page.waitForTimeout(300); }
+    if (sub === "教室") { await page.getByRole("button", { name: "編集" }).nth(4).click(); await page.waitForTimeout(300); }
     await page.screenshot({ path: `${out}/${name}-${file}.png`, fullPage: true });
   }
   await ctx.close();

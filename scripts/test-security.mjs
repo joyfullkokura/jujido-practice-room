@@ -383,15 +383,15 @@ if (!has004) {
       // 定期レッスン
       const cl = (await a.from("closures").insert({ room_id: null, start_at: at("10:00", plus(14)), end_at: at("11:00", plus(14)), reason: "__TEST__" }).select("id")).data?.[0]?.id;
       try {
+        const seriesBefore = (await a.from("reservations").select("id").eq("course", "__SERIES__")).data?.length;
         r = await a.rpc("create_series", seriesArgs());
         const pl = r.data ?? [];
         const reasonOf = (n) => pl.find((x) => x.day === plus(n))?.reason ?? "";
         check("定期の確認：5回のうち登録できるのは3回", pl.length === 5 && pl.filter((x) => x.ok).length === 3, desc(r));
         check("ほかの予約と重なる日は「重複」として外す", !pl.find((x) => x.day === date)?.ok && reasonOf(0).startsWith("重複"), reasonOf(0));
         check("予約不可枠の日は外し、理由を返す", reasonOf(14) === "予約不可（__TEST__）", reasonOf(14));
-        r = await a.from("reservations").select("id").eq("course", "__SERIES__")
-          .gte("start_at", at("00:00")).lt("start_at", at("23:59", plus(28)));
-        check("確認だけ（dry run）では登録されない", r.data?.length === 0, desc(r));
+        r = await a.from("reservations").select("id").eq("course", "__SERIES__");
+        check("確認だけ（dry run）では登録されない（呼ぶ前と件数が同じ）", r.data?.length === seriesBefore, `${seriesBefore}→${r.data?.length}`);
         r = await a.rpc("create_series", seriesArgs({ p_dry_run: false }));
         const made = (r.data ?? []).filter((x) => x.ok && x.id);
         check("定期を登録すると3件入る", made.length === 3, desc(r));
@@ -422,6 +422,68 @@ if (!has004) {
       check("定員より多い人数では出ない", !r.error && r.data.every((x) => x.capacity == null || x.capacity >= 31), desc(r));
     } else {
       console.log("\n⚠ migration 006 が未実行のため、料金・定期・空き教室検索のテストはスキップ");
+    }
+    const has008 = !(await a.from("shop_settings").select("id").limit(1)).error;
+    if (has008) {
+      console.log("--- 変更履歴・お店の設定（migration 008）");
+      r = await sb.from("audit_log").select("id").limit(1);
+      check("一般の人は変更履歴を読めない", denied(r), desc(r));
+      r = await sb.from("shop_settings").select("*");
+      check("一般の人はお店の設定を読めない", denied(r), desc(r));
+      r = await sb.from("shop_settings").update({ analysis_open: "05:00" }).eq("id", 1).select();
+      check("一般の人はお店の設定を変えられない", denied(r), desc(r));
+      const { c: u3 } = await login(env.TEST_USER_EMAIL, env.TEST_USER_PASSWORD);
+      if ((await u3.rpc("is_admin")).data === false) {
+        r = await u3.from("audit_log").select("id").limit(1);
+        check("管理者でないユーザーは変更履歴を読めない", denied(r), desc(r));
+        r = await u3.from("shop_settings").update({ analysis_open: "05:00" }).eq("id", 1).select();
+        check("管理者でないユーザーはお店の設定を変えられない", denied(r), desc(r));
+      }
+      await u3.auth.signOut();
+
+      const logsOf = async (table, id) => (await a.from("audit_log").select("actor_kind, actor_email, action, before, after")
+        .eq("table_name", table).eq("row_id", String(id)).order("id")).data ?? [];
+      r = await a.from("reservations").insert({ room_id: ROOM, name: "__TEST__", start_at: at("14:00"), end_at: at("14:30"), category: "rental", people: 2 }).select("id");
+      const rid = r.data?.[0]?.id;
+      let logs = await logsOf("reservations", rid);
+      check("管理者の予約登録が履歴に残る（管理者のメールつき）", logs[0]?.action === "insert" && logs[0]?.actor_kind === "admin"
+        && logs[0]?.actor_email?.toLowerCase() === env.TEST_ADMIN_EMAIL.toLowerCase() && logs[0]?.after?.name === "__TEST__", JSON.stringify(logs[0])?.slice(0, 120));
+      await a.from("reservations").update({ people: 1 }).eq("id", rid);
+      logs = await logsOf("reservations", rid);
+      const upd = logs.find((x) => x.action === "update");
+      check("変更は「変わった列」の前→後だけ記録（人数 2→1 と料金）", upd?.before?.people === 2 && upd?.after?.people === 1 && !("name" in (upd?.after ?? {})), JSON.stringify(upd)?.slice(0, 160));
+      await a.from("reservations").update({ note: null }).eq("id", rid);
+      check("何も変わらない更新は記録しない", (await logsOf("reservations", rid)).length === 2);
+      await a.from("reservations").update({ deleted_at: new Date().toISOString() }).eq("id", rid);
+      logs = await logsOf("reservations", rid);
+      check("削除（論理削除）も記録される", !!logs.at(-1)?.after?.deleted_at, JSON.stringify(logs.at(-1))?.slice(0, 120));
+
+      r = await book("20:30", "21:00");
+      logs = await logsOf("reservations", r.data);
+      check("一般の予約画面からの予約は「public」として記録（メールなし）", logs[0]?.actor_kind === "public" && logs[0]?.actor_email == null, JSON.stringify(logs[0])?.slice(0, 100));
+
+      r = await a.from("closures").insert({ room_id: null, start_at: at("09:00"), end_at: at("09:30"), reason: "__TEST__" }).select("id");
+      const cid = r.data?.[0]?.id;
+      await a.from("closures").delete().eq("id", cid);
+      logs = await logsOf("closures", cid);
+      check("予約不可枠の追加・削除が記録される（削除は消す前の内容つき）", logs.length === 2 && logs[1]?.action === "delete" && logs[1]?.before?.reason === "__TEST__", JSON.stringify(logs)?.slice(0, 120));
+
+      const anyLog = (await a.from("audit_log").select("id").order("id", { ascending: false }).limit(1)).data?.[0]?.id;
+      r = await a.from("audit_log").insert({ actor_kind: "admin", table_name: "x", action: "insert" });
+      check("管理者でも履歴を追加できない", !!r.error, desc(r));
+      r = await a.from("audit_log").update({ actor_email: "x" }).eq("id", anyLog).select();
+      check("管理者でも履歴を書き換えられない", denied(r), desc(r));
+      r = await a.from("audit_log").delete().eq("id", anyLog).select();
+      check("管理者でも履歴を削除できない", denied(r), desc(r));
+      check("履歴は残っている", (await a.from("audit_log").select("id").eq("id", anyLog)).data?.length === 1);
+
+      const cur = (await a.from("shop_settings").select("analysis_open, analysis_close").eq("id", 1).single()).data;
+      r = await a.from("shop_settings").update(cur).eq("id", 1).select();
+      check("管理者はお店の設定を更新できる（同じ値で確認）", r.data?.length === 1, desc(r));
+      r = await a.from("shop_settings").update({ analysis_open: "21:00", analysis_close: "09:00" }).eq("id", 1).select();
+      check("終了が開始より前の時間帯は拒否 (23514)", r.error?.code === "23514", desc(r));
+    } else {
+      console.log("\n⚠ migration 008 が未実行のため、変更履歴のテストはスキップ");
     }
     r = await a.from("admins").insert({ user_id: "00000000-0000-0000-0000-000000000000" });
     check("管理者でも API から管理者を追加できない（SQL Editor のみ）", !!r.error, desc(r));

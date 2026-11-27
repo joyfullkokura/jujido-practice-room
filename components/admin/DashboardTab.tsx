@@ -3,8 +3,8 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { WEEKDAYS, nowJST, toISO, addDays } from "@/lib/date";
 import { CATEGORIES, CATEGORY_KEYS } from "@/lib/booking";
-import { explain, fetchReservations, yen, type ReservationRow, type RoomRow } from "@/lib/admin";
-import { HEAT_HOURS, WINDOW, monthDays, monthStats, pct, ratio, shiftMonth, type MonthStats } from "@/lib/stats";
+import { explain, fetchReservations, fetchWindow, yen, type ReservationRow, type RoomRow } from "@/lib/admin";
+import { monthDays, monthStats, pct, ratio, shiftMonth, type MonthStats } from "@/lib/stats";
 import type { ClosureRow, HoursRow } from "@/lib/useShopCalendar";
 import { Button, Notice, SectionTitle, inputCls } from "@/components/ui";
 
@@ -15,7 +15,7 @@ const fmtH = (min: number) => `${(min / 60).toFixed(min % 60 ? 1 : 0)}h`;
 /** ダッシュボード・稼働率分析（印刷・PDF 保存対応） */
 export default function DashboardTab({ rooms }: { rooms: RoomRow[] }) {
   const [month, setMonth] = useState(() => nowJST().date.slice(0, 7));
-  const [data, setData] = useState<{ cur: MonthStats; prev: MonthStats; year: MonthStats } | null>(null);
+  const [data, setData] = useState<{ win: { open: number; close: number }; cur: MonthStats; prev: MonthStats; year: MonthStats } | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -23,7 +23,8 @@ export default function DashboardTab({ rooms }: { rooms: RoomRow[] }) {
     (async () => {
       const months = [month, shiftMonth(month, -1), shiftMonth(month, -12)];
       const first = monthDays(months[2])[0], last = monthDays(month).at(-1)!;
-      const [h, c, ...rs] = await Promise.all([
+      const [win, h, c, ...rs] = await Promise.all([
+        fetchWindow(),
         supabase.from("business_hours").select("weekday, open_time, close_time, is_closed"),
         supabase.from("closures").select("room_id, start_at, end_at").lt("start_at", toISO(addDays(last, 1), 0)).gt("end_at", toISO(first, 0)),
         ...months.map((m) => { const d = monthDays(m); return fetchReservations(d[0], d[d.length - 1]); }),
@@ -32,8 +33,8 @@ export default function DashboardTab({ rooms }: { rooms: RoomRow[] }) {
       const err = h.error ?? c.error ?? rs.find((x) => x.error)?.error ?? null;
       setError(err ? explain(err) : "");
       const calc = (m: string, rows: ReservationRow[] | null) => monthStats({ month: m, rows: rows ?? [], roomIds: rooms.map((r) => r.id),
-        hours: (h.data as HoursRow[] | null) ?? null, closures: (c.data as ClosureRow[] | null) ?? [] });
-      setData({ cur: calc(months[0], rs[0].data), prev: calc(months[1], rs[1].data), year: calc(months[2], rs[2].data) });
+        hours: (h.data as HoursRow[] | null) ?? null, closures: (c.data as ClosureRow[] | null) ?? [], window: win });
+      setData({ win, cur: calc(months[0], rs[0].data), prev: calc(months[1], rs[1].data), year: calc(months[2], rs[2].data) });
     })();
     return () => { live = false; };
   }, [month, rooms]);
@@ -55,7 +56,9 @@ export default function DashboardTab({ rooms }: { rooms: RoomRow[] }) {
   );
 }
 
-function Body({ d, rooms }: { d: { cur: MonthStats; prev: MonthStats; year: MonthStats }; rooms: RoomRow[] }) {
+function Body({ d, rooms }: { d: { win: { open: number; close: number }; cur: MonthStats; prev: MonthStats; year: MonthStats }; rooms: RoomRow[] }) {
+  const WINDOW = d.win;
+  const HEAT_HOURS = d.cur.heatHours;
   const { cur } = d;
   const T = cur.total;
   const rate = (s: MonthStats) => ratio(s.total.planned, s.total.avail);
@@ -79,7 +82,7 @@ function Body({ d, rooms }: { d: { cur: MonthStats; prev: MonthStats; year: Mont
         <Tile label="入金済 ／ 未収" value={yen(cur.revenue.paid)} sub={<span className="text-red-700">未収 {yen(cur.revenue.unpaid)}</span>} />
       </dl>
       <p className="text-sm tabular-nums">前月 {cmp(d.prev)}　／　前年同月 {cmp(d.year)}
-        <span className="ml-2 text-xs text-neutral-500">稼働率（予定）の比較。分母は営業日の {WINDOW.open / 60}:00〜{WINDOW.close / 60}:00 × 部屋数（予約不可・メンテナンスを除く）</span>
+        <span className="ml-2 text-xs text-neutral-500">稼働率（予定）の比較。分母は営業日の {WINDOW.open / 60}:00〜{WINDOW.close / 60}:00 × 部屋数（「設定」で変更可）（予約不可・メンテナンスを除く）</span>
       </p>
 
       {/* 部屋別 */}

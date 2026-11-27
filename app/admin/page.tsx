@@ -6,11 +6,8 @@ import { fetchAllRooms, type RoomRow } from "@/lib/admin";
 import { Button, Field, Notice, inputCls } from "@/components/ui";
 import DayTab from "@/components/admin/DayTab";
 import ListTab from "@/components/admin/ListTab";
-import ClosuresTab from "@/components/admin/ClosuresTab";
-import RoomsTab from "@/components/admin/RoomsTab";
-import HoursTab from "@/components/admin/HoursTab";
 import SearchTab, { type SearchPick } from "@/components/admin/SearchTab";
-import PricesTab from "@/components/admin/PricesTab";
+import SettingsTab from "@/components/admin/SettingsTab";
 import SalesTab from "@/components/admin/SalesTab";
 import DashboardTab from "@/components/admin/DashboardTab";
 import ReportTab from "@/components/admin/ReportTab";
@@ -22,10 +19,7 @@ const TABS = [
   { key: "dashboard", label: "ダッシュボード" },
   { key: "report", label: "レポート" },
   { key: "list", label: "一覧・CSV" },
-  { key: "closures", label: "予約不可" },
-  { key: "rooms", label: "部屋" },
-  { key: "hours", label: "営業時間" },
-  { key: "prices", label: "料金" },
+  { key: "settings", label: "設定" },
 ] as const;
 type Tab = (typeof TABS)[number]["key"];
 
@@ -108,10 +102,7 @@ function AdminShell({ email }: { email: string }) {
         {tab === "report" && <ReportTab rooms={rooms} />}
         {tab === "search" && <SearchTab rooms={rooms} onBook={(p) => { setPick(p); setTab("day"); }} />}
         {tab === "list" && <ListTab rooms={rooms} />}
-        {tab === "closures" && <ClosuresTab rooms={rooms} />}
-        {tab === "rooms" && <RoomsTab rooms={rooms} reload={reloadRooms} />}
-        {tab === "hours" && <HoursTab />}
-        {tab === "prices" && <PricesTab />}
+        {tab === "settings" && <SettingsTab rooms={rooms} reloadRooms={reloadRooms} />}
       </main>
     </div>
   );

@@ -375,7 +375,8 @@ async function trackPoint(page, room, time) {
   await closeSheet(page);
 
   console.log("--- 管理画面：料金設定");
-  await page.getByRole("button", { name: "料金", exact: true }).click();
+  await page.getByRole("button", { name: "設定", exact: true }).click();
+  await page.getByRole("button", { name: "料金・楽器", exact: true }).click();
   await page.waitForTimeout(400);
   check("料金設定と一般予約の有料／無料の切り替えが出る", await page.getByLabel("一般教室 基本料金（円/時・税抜）").inputValue() === "1000"
     && await page.getByRole("checkbox", { name: /一般の予約画面（LINE から）の予約を有料にする/ }).isChecked());
@@ -436,6 +437,40 @@ async function trackPoint(page, room, time) {
   await page.getByRole("button", { name: "この日の確定をすべて利用済みにする" }).click();
   await page.waitForTimeout(500);
   check("「確定」5件をまとめて利用済みにできる", await page.getByText("5件を利用済みにしました。").count() === 1);
+  await ctx.close();
+}
+
+// ───────── 管理画面：設定・変更履歴（フェーズ④） ─────────
+{
+  const ctx = await browser.newContext({ viewport: { width: 1366, height: 900 }, locale: "ja-JP", timezoneId: "Asia/Tokyo" });
+  const page = await ctx.newPage();
+  await page.clock.setFixedTime(new Date(NOW));
+  await openAdmin(page, url);
+  console.log("--- 管理画面：設定・変更履歴");
+  await page.getByRole("button", { name: "設定", exact: true }).click();
+  await page.waitForTimeout(400);
+  const subs = await page.getByRole("navigation", { name: "設定の項目" }).getByRole("button").allTextContents();
+  check("設定に 教室・営業時間・臨時休業・料金・変更履歴 がまとまっている", subs.join(",") === "教室,営業時間・休業日,臨時休業・予約不可,料金・楽器,変更履歴", subs.join(","));
+
+  await page.getByRole("button", { name: "営業時間・休業日", exact: true }).click();
+  await page.waitForTimeout(400);
+  check("集計・予約表の時間帯は設定値（9:00〜21:00）", await page.getByLabel("集計の開始").inputValue() === "540" && await page.getByLabel("集計の終了").inputValue() === "1260");
+  const req = page.waitForRequest((r) => /shop_settings/.test(r.url()) && r.method() === "PATCH");
+  await page.getByLabel("集計の開始").selectOption("480");
+  await page.getByRole("button", { name: "保存", exact: true }).last().click();
+  const body = (await req).postDataJSON();
+  check("時間帯を 8:00〜21:00 に変えて保存できる", body.analysis_open === "08:00" && body.analysis_close === "21:00", JSON.stringify(body));
+
+  await page.getByRole("button", { name: "変更履歴", exact: true }).click();
+  await page.waitForTimeout(500);
+  const items = page.getByRole("list", { name: "変更履歴" }).locator("li");
+  const text = async (i) => (await items.nth(i).textContent()) ?? "";
+  check("新しい順に並ぶ（5件）", await items.count() === 5 && (await text(0)).includes("10:05"));
+  check("予約のキャンセル：誰が・何を・前→後", (await text(0)).includes("予約　#8を変更") && (await text(0)).includes("予約状況：確定 → キャンセル") && (await text(0)).includes("admin@example.com"), await text(0));
+  check("一般の予約画面からの予約は「一般の予約画面」と出る", (await text(1)).includes("一般の予約画面") && (await text(1)).includes("山田 太郎") && (await text(1)).includes("区分：一般貸出"), await text(1));
+  check("料金設定の変更：消費税率 8 → 10", (await text(2)).includes("料金設定を変更") && (await text(2)).includes("消費税率(%)：8 → 10"), await text(2));
+  check("営業時間の変更：日曜日の定休日 いいえ → はい", (await text(3)).includes("営業時間　日曜日を変更") && (await text(3)).includes("定休日：いいえ → はい"), await text(3));
+  check("SQL Editor での変更は「SQL Editor（システム）」", (await text(4)).includes("SQL Editor（システム）") && (await text(4)).includes("部屋　L-1を追加"), await text(4));
   await ctx.close();
 }
 
