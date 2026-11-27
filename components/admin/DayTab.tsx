@@ -5,7 +5,7 @@ import { addDays, fmtDate, nowJST } from "@/lib/date";
 import { CATEGORIES, CATEGORY_KEYS, isActive } from "@/lib/booking";
 import { useShopCalendar } from "@/lib/useShopCalendar";
 import { describe, explain, fetchReservations, fetchWindow, type ReservationRow, type RoomRow } from "@/lib/admin";
-import Timeline, { type TLRow } from "@/components/admin/Timeline";
+import Timeline, { type TLRow } from "@/components/Timeline";
 import BookingEditor, { draftOf, newDraft, type Draft } from "@/components/admin/BookingEditor";
 import { Button, Notice, inputCls } from "@/components/ui";
 import type { SearchPick } from "@/components/admin/SearchTab";
@@ -94,6 +94,7 @@ export default function DayTab({ rooms, staff, pick, onPickUsed }: {
       {error && <div className="mx-4 mb-3 md:mx-0"><Notice>{error}</Notice></div>}
 
       <Timeline rows={tlRows} range={range} hours={hours} now={date === now.date ? now.min : null}
+        scrollTo={{ key: date, minute: date === now.date ? now.min - 60 : (hours?.open ?? range.open) }}
         selection={editing && !editing.id && editing.date === date ? { roomId: editing.room_id, start: editing.start, end: editing.end } : null}
         onPick={(roomId, s) => open({ room_id: roomId, ...s })}
         onItem={(id) => { const r = rows.find((x) => x.id === id); if (r) setEditing(draftOf(r)); }} />

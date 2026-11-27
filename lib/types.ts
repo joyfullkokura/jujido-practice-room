@@ -7,6 +7,8 @@ export const DEFAULT_CLOSE = 21 * 60;  // 21:00
 export type Room = {
   id: number; name: string; color: string;
   capacity: number | null; description: string | null; sort_order: number;
+  /** 常設楽器（migration 005 以降） */
+  instruments?: string | null;
 };
 
 /** 予約済みの時間帯（booked_slots から。個人情報なし） */

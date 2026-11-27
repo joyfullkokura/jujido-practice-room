@@ -14,6 +14,7 @@ Next.js 16 (App Router) + Supabase + Tailwind CSS。本番: https://jujido-pract
 7. `supabase/migrations/006_pricing_series.sql` … 料金設定・ホール楽器、料金計算（quote_price）と予約への記録、定期レッスン（create_series）、空き教室検索（search_free_rooms）
 8. `supabase/migrations/007_revoke_anon_functions.sql` … 管理者用の関数（料金計算・定期登録・空き検索）を一般の人から呼べないようにする
 9. `supabase/migrations/008_audit_settings.sql` … 変更履歴（audit_log・トリガーで自動記録、管理者だけ閲覧、書き換え不可）、集計・予約表の時間帯の設定（shop_settings）
+10. `supabase/migrations/009_rooms_public_quote.sql` … 試作用の「2階 練習室A／B」と予約を削除、8教室を公開（一覧で指定）、一般向け料金関数（public_quote）
 
 管理者の追加（SQL Editor）: `insert into admins (user_id) select id from auth.users where email = '…' on conflict do nothing;`
 

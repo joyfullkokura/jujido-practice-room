@@ -485,6 +485,38 @@ if (!has004) {
     } else {
       console.log("\n⚠ migration 008 が未実行のため、変更履歴のテストはスキップ");
     }
+    const pq = (room, s, e) => sb.rpc("public_quote", { p_room_id: room, p_start_at: at(s), p_end_at: at(e) });
+    const has009 = !(await pq(ROOM, "10:00", "11:00")).error;
+    if (has009) {
+      console.log("--- 一般の予約画面の料金・試作の部屋の削除（migration 009）");
+      const S9 = (await a.from("price_settings").select("*").eq("id", 1).single()).data;
+      const taxed = (net) => net + Math.round((net * S9.tax_rate) / 100);
+      r = await pq(ROOM, "10:00", "11:30");
+      check(`一般の人も料金（税込）だけは取得できる：1時間30分 = ${S9.public_charge ? taxed(Math.round(S9.base_per_hour * 1.5)) : "（無料設定なので null）"}`,
+        !r.error && r.data === (S9.public_charge ? taxed(Math.round(S9.base_per_hour * 1.5)) : null), desc(r));
+      const hallPub = (await sb.from("rooms").select("id").eq("is_hall", true).limit(1)).data?.[0]?.id;
+      if (hallPub && S9.public_charge) {
+        r = await pq(hallPub, "10:00", "11:00");
+        check("公開中のホールはホール料金（1人・追加楽器なし）", r.data === taxed(S9.hall_per_hour), desc(r));
+      }
+      r = await pq(999999, "10:00", "11:00");
+      check("存在しない・非公開の部屋は料金を返さない (null)", !r.error && r.data === null, desc(r));
+      r = await pq(ROOM, "10:00", "13:30");
+      check("3時間を超える時間は料金を返さない (null)", !r.error && r.data === null, desc(r));
+      try {
+        await a.from("price_settings").update({ public_charge: false }).eq("id", 1);
+        r = await pq(ROOM, "10:00", "11:00");
+        check("「一般予約を有料にする」がオフなら料金を返さない (null)", !r.error && r.data === null, desc(r));
+      } finally {
+        await a.from("price_settings").update({ public_charge: S9.public_charge }).eq("id", 1);
+      }
+      r = await a.from("rooms").select("id").in("name", ["2階 練習室A", "2階 練習室B"]);
+      check("試作用の「2階 練習室A／B」は削除されている", r.data?.length === 0, desc(r));
+      r = await sb.from("rooms").select("name, is_public");
+      check("一般の人に見える部屋はすべて公開中（1部屋以上）", r.data?.length >= 1 && r.data.every((x) => x.is_public), (r.data ?? []).map((x) => x.name).join(" / "));
+    } else {
+      console.log("\n⚠ migration 009 が未実行のため、一般の料金表示のテストはスキップ");
+    }
     r = await a.from("admins").insert({ user_id: "00000000-0000-0000-0000-000000000000" });
     check("管理者でも API から管理者を追加できない（SQL Editor のみ）", !!r.error, desc(r));
     await a.auth.signOut();

@@ -27,7 +27,8 @@ export default function BookingSheet({ selection, busy, range, room, source, onC
   const [school, setSchool] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
-  const [done, setDone] = useState<{ sel: Selection; room: Room } | null>(null);
+  const [done, setDone] = useState<{ sel: Selection; room: Room; price: number | null } | null>(null);
+  const [price, setPrice] = useState<number | null>(null);
   const { start, end } = selection;
   const len = end - start;
 
@@ -43,6 +44,17 @@ export default function BookingSheet({ selection, busy, range, room, source, onC
 
   useEffect(() => setError(""), [selection.date, start, end, selection.roomId]);
 
+  // 料金（税込）：有料の設定のときだけ DB の public_quote が金額を返す。無料・取得できないときは表示しない
+  useEffect(() => {
+    let live = true;
+    const t = setTimeout(async () => {
+      const { data, error } = await supabase.rpc("public_quote", {
+        p_room_id: selection.roomId, p_start_at: toISO(selection.date, start), p_end_at: toISO(selection.date, end) });
+      if (live) setPrice(!error && typeof data === "number" ? data : null);
+    }, 200);
+    return () => { live = false; clearTimeout(t); };
+  }, [selection.roomId, selection.date, start, end]);
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) return setError("名前を入力してください");
@@ -54,7 +66,7 @@ export default function BookingSheet({ selection, busy, range, room, source, onC
       p_name: name, p_school: school, p_source: source,
     });
     setSending(false);
-    if (!error) { setDone({ sel: selection, room }); onBooked(); return; }
+    if (!error) { setDone({ sel: selection, room, price }); onBooked(); return; }
     if (error.code === "23P01" || error.code === "23505") setError("選んだ時間に、ちょうど別の予約が入りました。別の時間を選んでください。");
     else if (error.code === "23514") setError("名前と学校名は50文字以内で入力してください。");
     else if (error.code === "P0001") setError(error.message);
@@ -71,6 +83,7 @@ export default function BookingSheet({ selection, busy, range, room, source, onC
             <Row k="日付" v={fmtDate(done.sel.date)} />
             <Row k="時間" v={`${fmtMin(done.sel.start)}〜${fmtMin(done.sel.end)}（${fmtLen(done.sel.end - done.sel.start)}）`} />
             <Row k="部屋" v={done.room.name} />
+            {done.price != null && <Row k="料金" v={`${yen(done.price)}（税込）`} />}
           </dl>
           <button onClick={onClose} className="mt-6 h-12 w-full rounded-sm border border-neutral-300 text-base font-semibold text-neutral-800 active:bg-neutral-100">
             閉じる
@@ -86,6 +99,7 @@ export default function BookingSheet({ selection, busy, range, room, source, onC
             <i className="size-2 rounded-xs" style={{ background: room.color }} />{room.name}
             {room.capacity ? <span className="text-sm text-neutral-500">定員 {room.capacity}人</span> : null}
           </p>
+          {room.instruments && <p className="mt-1 text-sm text-neutral-500">{room.instruments}</p>}
           {room.description && <p className="mt-1 text-sm text-neutral-500">{room.description}</p>}
 
           {/* 時間：リストから直接選ぶ／− ＋ で15分ずつ */}
@@ -127,6 +141,13 @@ export default function BookingSheet({ selection, busy, range, room, source, onC
               className={input} placeholder="○○中学校" />
           </label>
 
+          {price != null && (
+            <p className="mt-5 flex items-baseline justify-between border-y border-neutral-200 py-3" data-testid="public-price">
+              <span className="text-sm text-neutral-600">料金（税込）</span>
+              <span className="text-xl font-bold tabular-nums">{yen(price)}</span>
+            </p>
+          )}
+
           {error && <p className="mt-4 border-l-2 border-red-600 bg-red-50 px-3 py-2 text-[15px] text-red-800" role="alert">{error}</p>}
 
           <button type="submit" disabled={sending}
@@ -166,6 +187,8 @@ function TimeRow({ label, value, options, onSelect, onMinus, onPlus, minusOk, pl
     </div>
   );
 }
+
+const yen = (n: number) => `¥${n.toLocaleString("ja-JP")}`;
 
 function Row({ k, v }: { k: string; v: string }) {
   return (
