@@ -1,6 +1,6 @@
 // 権限テスト（一般利用者 = anon の立場で実行）: node --env-file=.env.local scripts/test-security.mjs
 // テスト予約は 2099年のランダムな日付に、名前 "__TEST__" で入ります
-//   削除（SQL Editor）: delete from reservations where name = '__TEST__';
+//   テストで作ったデータは最後に自動で削除（migration 011 の delete_test_data。途中で失敗しても実行）
 import { createClient } from "@supabase/supabase-js";
 
 const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.NEXT_PUBLIC_SUPABASE_KEY,
@@ -37,6 +37,28 @@ const ranges = async (room = ROOM) =>
       return `${f(r.start_at)}-${f(r.end_at)}`;
     }).sort().join(",");
 
+// テストで作ったデータ（名前・理由が __TEST__・2099年）は、最後に必ず消す（途中で失敗しても finally で実行）
+async function cleanup() {
+  const e = process.env;
+  if (!e.TEST_ADMIN_EMAIL) return console.log("\n⚠ 管理者のログイン情報がないため、テストデータを消せませんでした");
+  const c = createClient(e.NEXT_PUBLIC_SUPABASE_URL, e.NEXT_PUBLIC_SUPABASE_KEY, { auth: { persistSession: false } });
+  const { error: le } = await c.auth.signInWithPassword({ email: e.TEST_ADMIN_EMAIL, password: e.TEST_ADMIN_PASSWORD });
+  if (le) return console.log(`\n⚠ テストデータを消せませんでした（管理者でログインできない：${le.message}）`);
+  const { data, error } = await c.rpc("delete_test_data");
+  if (error?.code === "PGRST202") console.log("\n⚠ migration 011 が未実行のため、テストデータは残っています（delete_test_data がない）");
+  else if (error) { ng++; console.log(`❌ テストデータの削除に失敗  (${error.code} ${error.message})`); }
+  else {
+    const d = data?.[0] ?? {};
+    console.log(`\n--- 後片付け：予約 ${d.n_reservations}件・予約不可 ${d.n_closures}件・部屋 ${d.n_rooms}件・楽器 ${d.n_hall_extras}件 を削除`);
+    const left = (await c.from("reservations").select("id").eq("name", "__TEST__").gte("start_at", "2099-01-01T00:00:00+09:00").limit(1)).data ?? [];
+    check("テストで作った予約は残っていない", left.length === 0, `${left.length}件`);
+    const leftC = (await c.from("closures").select("id").eq("reason", "__TEST__").limit(1)).data ?? [];
+    check("テストで作った予約不可枠は残っていない", leftC.length === 0, `${leftC.length}件`);
+  }
+  await c.auth.signOut();
+}
+
+try {
 console.log(`--- 予約の流れ（テスト日 ${date}、部屋 ${rooms[0]?.name}）`);
 let r = await book("15:15", "16:45");
 check("15:15〜16:45 を予約できる", !r.error, desc(r));
@@ -552,12 +574,62 @@ if (!has004) {
     } else {
       console.log("\n⚠ migration 009 が未実行のため、一般の料金表示のテストはスキップ");
     }
+    // ───────── テストデータ削除の関数（migration 011）・アカウント（パスワード変更） ─────────
+    r = await sb.rpc("delete_test_data");
+    if (r.error?.code === "PGRST202") {
+      console.log("\n⚠ migration 011 が未実行のため、テストデータ削除の関数のテストはスキップ");
+    } else {
+      console.log("--- テストデータ削除の関数（migration 011）");
+      check("一般の人はテストデータ削除の関数を呼べない", !!r.error, desc(r));
+    }
+    console.log("--- アカウント（パスワードの変更・権限の書き換え）");
+    {
+      const { c: u5, error: e5 } = await login(env.TEST_USER_EMAIL, env.TEST_USER_PASSWORD);
+      if (!e5 && (await u5.rpc("is_admin")).data === false) {
+        r = await u5.rpc("delete_test_data");
+        if (r.error?.code !== "PGRST202") check("管理者でないユーザーはテストデータ削除の関数を呼べない", !!r.error, desc(r));
+        // 自分のプロフィール情報（user_metadata）に role を書いても管理者にはならない（管理者の判定は admins 表だけ）
+        await u5.auth.updateUser({ data: { role: "admin", is_admin: true } });
+        check("updateUser で role: admin と書いても管理者にはなれない", (await u5.rpc("is_admin")).data === false);
+        await u5.auth.updateUser({ data: { role: null, is_admin: null } });
+        // 実際のパスワード変更（確認用の一般ユーザーで行い、最後に必ず元に戻す）
+        const tmp = `${env.TEST_USER_PASSWORD}-Tmp9`;
+        let changed = false;
+        try {
+          r = await u5.auth.updateUser({ password: tmp });
+          changed = !r.error;
+          check("ログイン中のユーザーは auth.updateUser で自分のパスワードを変えられる", changed, r.error ? `${r.error.code} ${r.error.message}` : "");
+          if (changed) {
+            const n = await login(env.TEST_USER_EMAIL, tmp);
+            check("新しいパスワードでログインできる", !n.error, n.error?.message);
+            await n.c.auth.signOut();
+            const o = await login(env.TEST_USER_EMAIL, env.TEST_USER_PASSWORD);
+            check("古いパスワードではログインできない", !!o.error);
+          }
+        } finally {
+          if (changed) {
+            const back = await login(env.TEST_USER_EMAIL, tmp);
+            const rb = back.error ? back : await back.c.auth.updateUser({ password: env.TEST_USER_PASSWORD });
+            check("テスト用ユーザーのパスワードを元に戻した", !rb.error, rb.error?.message);
+            if (rb.error) console.log(`⚠ TEST_USER のパスワードが「元のパスワード-Tmp9」のままです。Supabase の Authentication から元に戻してください`);
+            if (!back.error) await back.c.auth.signOut();
+          }
+        }
+      }
+      await u5.auth.signOut();
+    }
     r = await a.from("admins").insert({ user_id: "00000000-0000-0000-0000-000000000000" });
     check("管理者でも API から管理者を追加できない（SQL Editor のみ）", !!r.error, desc(r));
     await a.auth.signOut();
   }
 }
 
+} catch (e) {
+  ng++;
+  console.log(`❌ テストが途中で止まりました  (${e?.message ?? e})`);
+} finally {
+  await cleanup();
+}
+
 console.log(`\n結果: ${ok} 件OK / ${ng} 件NG`);
-console.log("テスト予約の削除（SQL Editor）: delete from reservations where name = '__TEST__';");
 process.exit(ng ? 1 : 0);

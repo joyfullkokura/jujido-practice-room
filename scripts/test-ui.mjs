@@ -491,7 +491,7 @@ async function trackPoint(page, room, time) {
   await page.getByRole("button", { name: "設定", exact: true }).click();
   await page.waitForTimeout(400);
   const subs = await page.getByRole("navigation", { name: "設定の項目" }).getByRole("button").allTextContents();
-  check("設定に 教室・営業時間・臨時休業・料金・変更履歴 がまとまっている", subs.join(",") === "教室,営業時間・休業日,臨時休業・予約不可,料金・楽器,変更履歴", subs.join(","));
+  check("設定に 教室・営業時間・臨時休業・料金・変更履歴・アカウント がまとまっている", subs.join(",") === "教室,営業時間・休業日,臨時休業・予約不可,料金・楽器,変更履歴,アカウント", subs.join(","));
 
   await page.getByRole("button", { name: "営業時間・休業日", exact: true }).click();
   await page.waitForTimeout(400);
@@ -512,6 +512,56 @@ async function trackPoint(page, room, time) {
   check("料金設定の変更：消費税率 8 → 10", (await text(2)).includes("料金設定を変更") && (await text(2)).includes("消費税率(%)：8 → 10"), await text(2));
   check("営業時間の変更：日曜日の定休日 いいえ → はい", (await text(3)).includes("営業時間　日曜日を変更") && (await text(3)).includes("定休日：いいえ → はい"), await text(3));
   check("SQL Editor での変更は「SQL Editor（システム）」", (await text(4)).includes("SQL Editor（システム）") && (await text(4)).includes("部屋　L-1を追加"), await text(4));
+  await ctx.close();
+}
+
+// ───────── 管理画面：設定 → アカウント（パスワードの変更） ─────────
+{
+  const ctx = await browser.newContext({ viewport: { width: 1366, height: 900 }, locale: "ja-JP", timezoneId: "Asia/Tokyo" });
+  const page = await ctx.newPage();
+  await page.clock.setFixedTime(new Date(NOW));
+  await openAdmin(page, url);
+  // 今のパスワードは "x"（ログインに使ったもの）。違うパスワードは Supabase と同じ 400 を返す
+  const tokenBodies = [];
+  await page.route(/\/auth\/v1\/token/, async (r) => {
+    const b = r.request().postDataJSON();
+    tokenBodies.push(b);
+    if (b.password !== "x") return r.fulfill({ status: 400, json: { code: "invalid_credentials", error_code: "invalid_credentials", msg: "Invalid login credentials" } });
+    const { session } = await import("./mock-admin.mjs");
+    return r.fulfill({ json: session });
+  });
+  const puts = [];
+  await page.route(/\/auth\/v1\/user/, async (r) => {
+    if (r.request().method() === "PUT") puts.push(r.request().postDataJSON());
+    const { session } = await import("./mock-admin.mjs");
+    return r.fulfill({ json: session.user });
+  });
+  await page.route(/\/auth\/v1\/logout/, (r) => r.fulfill({ status: 204, body: "" }));
+
+  console.log("--- 管理画面：アカウント（パスワードの変更）");
+  await page.getByRole("button", { name: "設定", exact: true }).click();
+  await page.getByRole("button", { name: "アカウント", exact: true }).click();
+  await page.waitForTimeout(300);
+  check("ログイン中のメールアドレスが出る", await page.getByText("admin@example.com").count() >= 1);
+  const fill = async (cur, nx, again) => {
+    await page.getByLabel("今のパスワード").fill(cur);
+    await page.getByLabel("新しいパスワード", { exact: true }).fill(nx);
+    await page.getByLabel("新しいパスワード（確認用）").fill(again);
+    await page.getByRole("button", { name: "パスワードを変更する" }).click();
+    await page.waitForTimeout(400);
+  };
+  await fill("x", "short", "short");
+  check("8文字未満は変更できない", await page.getByText("8文字以上にしてください").count() === 1 && puts.length === 0);
+  await fill("x", "newpass123", "newpass124");
+  check("確認用と一致しないと変更できない", await page.getByText("確認用が一致しません").count() === 1 && puts.length === 0);
+  await fill("wrong", "newpass123", "newpass123");
+  check("今のパスワードが違うと変更できない（updateUser は呼ばれない）", await page.getByText("今のパスワードが違います").count() === 1 && puts.length === 0);
+  await fill("x", "newpass123", "newpass123");
+  await page.waitForTimeout(500);
+  check("今のパスワードで本人確認してから変更する", tokenBodies.at(-1)?.password === "x" && tokenBodies.at(-1)?.email === "admin@example.com");
+  check("auth.updateUser に新しいパスワードだけを送る（メールアドレスや権限などは送らない）", puts.length === 1 && puts[0].password === "newpass123" && Object.keys(puts[0]).filter((k) => puts[0][k] != null).join(",") === "password", JSON.stringify(puts));
+  check("変更後はログアウトして、ログイン画面に「新しいパスワードでログイン」と出る",
+    await page.getByRole("heading", { name: "管理者ログイン" }).count() === 1 && await page.getByText("新しいパスワードでログインしてください").count() === 1);
   await ctx.close();
 }
 

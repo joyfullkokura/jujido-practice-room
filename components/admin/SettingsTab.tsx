@@ -7,6 +7,7 @@ import HoursTab from "@/components/admin/HoursTab";
 import ClosuresTab from "@/components/admin/ClosuresTab";
 import PricesTab from "@/components/admin/PricesTab";
 import HistoryTab from "@/components/admin/HistoryTab";
+import AccountTab from "@/components/admin/AccountTab";
 import { Button, Field, Notice, SectionTitle, TimeSelect } from "@/components/ui";
 
 const SUBS = [
@@ -15,11 +16,12 @@ const SUBS = [
   { key: "closures", label: "臨時休業・予約不可" },
   { key: "prices", label: "料金・楽器" },
   { key: "history", label: "変更履歴" },
+  { key: "account", label: "アカウント" },
 ] as const;
 type Sub = (typeof SUBS)[number]["key"];
 
 /** 各種設定（試作の「各種設定」に対応） */
-export default function SettingsTab({ rooms, reloadRooms }: { rooms: RoomRow[]; reloadRooms: () => Promise<void> }) {
+export default function SettingsTab({ rooms, reloadRooms, email }: { rooms: RoomRow[]; reloadRooms: () => Promise<void>; email: string }) {
   const [sub, setSub] = useState<Sub>("rooms");
   return (
     <div className="md:grid md:grid-cols-[11rem_1fr] md:gap-8">
@@ -37,6 +39,7 @@ export default function SettingsTab({ rooms, reloadRooms }: { rooms: RoomRow[]; 
         {sub === "hours" && (<><HoursTab /><WindowSettings /></>)}
         {sub === "closures" && <ClosuresTab rooms={rooms} />}
         {sub === "prices" && <PricesTab />}
+        {sub === "account" && <AccountTab email={email} />}
         {sub === "history" && <div className="px-4 py-4 md:px-0"><HistoryTab rooms={rooms} /></div>}
       </div>
     </div>

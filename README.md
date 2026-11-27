@@ -16,6 +16,7 @@ Next.js 16 (App Router) + Supabase + Tailwind CSS。本番: https://jujido-pract
 9. `supabase/migrations/008_audit_settings.sql` … 変更履歴（audit_log・トリガーで自動記録、管理者だけ閲覧、書き換え不可）、集計・予約表の時間帯の設定（shop_settings）
 10. `supabase/migrations/009_rooms_public_quote.sql` … 試作用の「2階 練習室A／B」と予約を削除、8教室を公開（一覧で指定）、一般向け料金関数（public_quote）
 11. `supabase/migrations/010_public_people.sql` … 一般の予約で人数を選べるように（create_reservation・public_quote に人数。定員を超える人数は拒否）
+12. `supabase/migrations/011_test_data_cleanup.sql` … テストデータ（__TEST__・2099年）の一括削除と、テストの最後に呼ぶ削除関数（delete_test_data・管理者のみ）
 
 管理者の追加（SQL Editor）: `insert into admins (user_id) select id from auth.users where email = '…' on conflict do nothing;`
 
@@ -24,7 +25,7 @@ Next.js 16 (App Router) + Supabase + Tailwind CSS。本番: https://jujido-pract
 2. `npm install` → `npm run dev` → http://localhost:3000
 
 ## 確認用スクリプト
-- 権限テスト: `node --env-file=.env.local --env-file=.env.test.local scripts/test-security.mjs`（.env.test.local に TEST_ADMIN_EMAIL / TEST_ADMIN_PASSWORD / TEST_USER_EMAIL / TEST_USER_PASSWORD）
+- 権限テスト: `node --env-file=.env.local --env-file=.env.test.local scripts/test-security.mjs`（.env.test.local に TEST_ADMIN_EMAIL / TEST_ADMIN_PASSWORD / TEST_USER_EMAIL / TEST_USER_PASSWORD）（最後にテストデータを自動で削除）
   - テスト予約は 2099 年に入る。削除: `delete from reservations where name = '__TEST__';`
 - 画面の動作テスト（ドラッグ選択・時刻リスト。サンプルデータ使用）: `npm run dev` を起動して `node scripts/test-ui.mjs`
 - 管理画面のスクリーンショット（サンプルデータ使用）: `npm run dev` を起動して `node scripts/screenshot-admin.mjs <保存先>`

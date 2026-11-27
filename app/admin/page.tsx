@@ -8,6 +8,7 @@ import DayTab from "@/components/admin/DayTab";
 import ListTab from "@/components/admin/ListTab";
 import SearchTab, { type SearchPick } from "@/components/admin/SearchTab";
 import SettingsTab from "@/components/admin/SettingsTab";
+import { PW_CHANGED_KEY } from "@/components/admin/AccountTab";
 import SalesTab from "@/components/admin/SalesTab";
 import DashboardTab from "@/components/admin/DashboardTab";
 import ReportTab from "@/components/admin/ReportTab";
@@ -102,7 +103,7 @@ function AdminShell({ email }: { email: string }) {
         {tab === "report" && <ReportTab rooms={rooms} />}
         {tab === "search" && <SearchTab rooms={rooms} onBook={(p) => { setPick(p); setTab("day"); }} />}
         {tab === "list" && <ListTab rooms={rooms} />}
-        {tab === "settings" && <SettingsTab rooms={rooms} reloadRooms={reloadRooms} />}
+        {tab === "settings" && <SettingsTab rooms={rooms} reloadRooms={reloadRooms} email={email} />}
       </main>
     </div>
   );
@@ -113,6 +114,13 @@ function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
+  // パスワードを変えてログアウトした直後なら、お知らせを出す（1回だけ）
+  const [changed, setChanged] = useState(false);
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem(PW_CHANGED_KEY)) { setChanged(true); sessionStorage.removeItem(PW_CHANGED_KEY); }
+    } catch {}
+  }, []);
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setSending(true);
@@ -125,6 +133,7 @@ function Login() {
     <Centered>
       <p className="text-xs text-neutral-500">十字堂楽器店 練習室予約</p>
       <h1 className="text-lg font-bold">管理者ログイン</h1>
+      {changed && <div className="mt-4"><Notice tone="info">パスワードを変更しました。新しいパスワードでログインしてください。</Notice></div>}
       <form onSubmit={submit} className="mt-6 space-y-4">
         <Field label="メールアドレス">
           <input type="email" autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)} className={inputCls} />
