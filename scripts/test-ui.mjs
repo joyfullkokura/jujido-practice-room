@@ -36,7 +36,8 @@ async function open(ctxOpts, path = "/", now = NOW) {
   await page.route(/\/rest\/v1\/rpc\/public_quote/, (r) => {
     const b = r.request().postDataJSON();
     const h = (Date.parse(b.p_end_at) - Date.parse(b.p_start_at)) / 3600e3;
-    r.fulfill({ json: PRICE_ON ? Math.round(1000 * h) + Math.round(Math.round(1000 * h) * 0.1) : null });
+    const net = Math.round((1000 + 100 * ((b.p_people ?? 1) - 1)) * h);   // 2人目から +100円/時
+    r.fulfill({ json: PRICE_ON ? net + Math.round(net * 0.1) : null });
   });
   await page.route(/\/rest\/v1\/rpc\/create_reservation/, (r) => r.fulfill({ json: 123 }));
   await page.route(/\/rest\/v1\/rooms/, (r) => r.fulfill({ json: ROOMS }));
@@ -129,6 +130,12 @@ async function pubPoint(page, room, time, open = PUB_OPEN) {
   await page.getByLabel("終了時刻").selectOption(String(M("14:30")));
   await page.waitForTimeout(400);
   check("時間を変えると料金も変わる：1時間30分 ¥1,650", ((await page.getByTestId("public-price").textContent().catch(() => "")) ?? "").includes("¥1,650"));
+  const peopleOpts = await page.getByRole("dialog").getByLabel("人数").locator("option").allTextContents();
+  check("人数は 1人〜定員（5人）から選べる", peopleOpts.join(",") === "1人,2人,3人,4人,5人", peopleOpts.join(","));
+  await page.getByRole("dialog").getByLabel("人数").selectOption("3");
+  await page.waitForTimeout(400);
+  check("人数を変えると料金も変わる：3人 1時間30分 = (1000+200)×1.5+税 ¥1,980", ((await page.getByTestId("public-price").textContent().catch(() => "")) ?? "").includes("¥1,980"));
+  await page.getByRole("dialog").getByLabel("人数").selectOption("1");
   await page.getByLabel("終了時刻").selectOption(String(M("16:00")));
   await page.getByLabel("開始時刻").selectOption(String(M("16:30")));
   await page.waitForTimeout(150);
@@ -141,7 +148,7 @@ async function pubPoint(page, room, time, open = PUB_OPEN) {
   s = await sheetTimes(page);
   check("＋ で開始 16:45、終了は 17:15 のまま（30分）", s.start === "16:45" && s.end === "17:15", `${s.start}〜${s.end}`);
   check("さらに ＋ は押せない（30分取れない）", await page.getByRole("button", { name: "開始を15分遅く" }).isDisabled());
-  check("フォームに区分・料金の選択はない（名前・学校名・時間だけ）",
+  check("フォームに区分・料金の選択はない（名前・学校名・人数・時間だけ）",
     await page.getByRole("dialog").locator("input").count() === 2 && await page.getByRole("dialog").getByText("区分").count() === 0);
   await closeSheet(page);
 
@@ -176,12 +183,14 @@ async function pubPoint(page, room, time, open = PUB_OPEN) {
   await page.mouse.click(p.x, p.y);
   await page.waitForTimeout(400);
   await page.getByRole("dialog").getByPlaceholder("十字 太郎").fill("テスト 花子");
+  await page.getByRole("dialog").getByLabel("人数").selectOption("2");
   await page.getByRole("dialog").getByRole("button", { name: /で予約する/ }).click();
   const body = (await req).postDataJSON();
-  check("?from=○○中 で開くと、予約に流入元「○○中」が付く", body.p_source === "○○中" && body.p_name === "テスト 花子"
+  check("?from=○○中 で開くと、予約に流入元「○○中」と人数が付く", body.p_source === "○○中" && body.p_name === "テスト 花子" && body.p_people === 2
     && body.p_start_at === t("13:00") && body.p_end_at === t("14:00"), JSON.stringify(body));
   await page.waitForTimeout(400);
-  check("完了画面に料金（税込）が出る", ((await page.getByRole("dialog").textContent()) ?? "").includes("料金¥1,100（税込）"));
+  const doneText = (await page.getByRole("dialog").textContent()) ?? "";
+  check("完了画面に人数と料金（税込）が出る：2人 1時間 ¥1,210", doneText.includes("人数2人") && doneText.includes("料金¥1,210（税込）"), doneText.slice(0, 80));
   await ctx.close();
 }
 {

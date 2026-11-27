@@ -27,7 +27,9 @@ export default function BookingSheet({ selection, busy, range, room, source, onC
   const [school, setSchool] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
-  const [done, setDone] = useState<{ sel: Selection; room: Room; price: number | null } | null>(null);
+  const [people, setPeople] = useState(1);
+  const maxPeople = room.capacity ?? 10;
+  const [done, setDone] = useState<{ sel: Selection; room: Room; price: number | null; people: number } | null>(null);
   const [price, setPrice] = useState<number | null>(null);
   const { start, end } = selection;
   const len = end - start;
@@ -49,11 +51,13 @@ export default function BookingSheet({ selection, busy, range, room, source, onC
     let live = true;
     const t = setTimeout(async () => {
       const { data, error } = await supabase.rpc("public_quote", {
-        p_room_id: selection.roomId, p_start_at: toISO(selection.date, start), p_end_at: toISO(selection.date, end) });
+        p_room_id: selection.roomId, p_start_at: toISO(selection.date, start), p_end_at: toISO(selection.date, end), p_people: people });
       if (live) setPrice(!error && typeof data === "number" ? data : null);
     }, 200);
     return () => { live = false; clearTimeout(t); };
-  }, [selection.roomId, selection.date, start, end]);
+  }, [selection.roomId, selection.date, start, end, people]);
+  // 部屋の定員より多ければ定員に
+  useEffect(() => setPeople((n) => Math.min(n, maxPeople)), [maxPeople]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -63,10 +67,17 @@ export default function BookingSheet({ selection, busy, range, room, source, onC
     const { error } = await supabase.rpc("create_reservation", {
       p_room_id: selection.roomId,
       p_start_at: toISO(selection.date, start), p_end_at: toISO(selection.date, end),
-      p_name: name, p_school: school, p_source: source,
+      p_name: name, p_school: school, p_source: source, p_people: people,
     });
     setSending(false);
-    if (!error) { setDone({ sel: selection, room, price }); onBooked(); return; }
+    if (!error) {
+      // 完了画面の料金は、予約した内容で取り直す（人数・時間を変えた直後でも古い金額を出さない）
+      const q = await supabase.rpc("public_quote", {
+        p_room_id: selection.roomId, p_start_at: toISO(selection.date, start), p_end_at: toISO(selection.date, end), p_people: people });
+      setDone({ sel: selection, room, price: !q.error && typeof q.data === "number" ? q.data : null, people });
+      onBooked();
+      return;
+    }
     if (error.code === "23P01" || error.code === "23505") setError("選んだ時間に、ちょうど別の予約が入りました。別の時間を選んでください。");
     else if (error.code === "23514") setError("名前と学校名は50文字以内で入力してください。");
     else if (error.code === "P0001") setError(error.message);
@@ -83,6 +94,7 @@ export default function BookingSheet({ selection, busy, range, room, source, onC
             <Row k="日付" v={fmtDate(done.sel.date)} />
             <Row k="時間" v={`${fmtMin(done.sel.start)}〜${fmtMin(done.sel.end)}（${fmtLen(done.sel.end - done.sel.start)}）`} />
             <Row k="部屋" v={done.room.name} />
+            <Row k="人数" v={`${done.people}人`} />
             {done.price != null && <Row k="料金" v={`${yen(done.price)}（税込）`} />}
           </dl>
           <button onClick={onClose} className="mt-6 h-12 w-full rounded-sm border border-neutral-300 text-base font-semibold text-neutral-800 active:bg-neutral-100">
@@ -131,6 +143,13 @@ export default function BookingSheet({ selection, busy, range, room, source, onC
           </div>
 
           <label className="mt-5 block">
+            <span className={labelCls}>人数{room.capacity ? <span className="ml-2 text-xs font-normal text-neutral-500">定員 {room.capacity}人</span> : null}</span>
+            <select aria-label="人数" value={people} onChange={(e) => setPeople(Number(e.target.value))} className={`${input} tabular-nums`}>
+              {Array.from({ length: maxPeople }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{n}人</option>)}
+            </select>
+          </label>
+
+          <label className="mt-4 block">
             <span className={labelCls}>名前<span className="ml-1 text-xs font-normal text-red-600">必須</span></span>
             <input value={name} onChange={(e) => setName(e.target.value)} maxLength={50} autoComplete="name"
               className={input} placeholder="十字 太郎" />

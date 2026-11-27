@@ -15,7 +15,16 @@ const desc = (r) => (r.error ? `${r.error.code} ${r.error.message}` : `data=${JS
 
 const rooms = (await sb.from("rooms").select("id, name, is_public").order("sort_order").order("id")).data ?? [];
 const ROOM = rooms[0]?.id, OTHER = rooms[1]?.id;
-const date = new Date(Date.UTC(2099, 0, 1 + Math.floor(Math.random() * 360))).toISOString().slice(0, 10);
+// テスト日：2099年のうち、使う2部屋に（これまでのテストの）予約がない日を選ぶ（定期のテストで4週間先まで使う）
+let date;
+for (let i = 0; i < 40; i++) {
+  const d = new Date(Date.UTC(2099, 0, 1 + Math.floor(Math.random() * 330))).toISOString().slice(0, 10);
+  const until = new Date(Date.parse(d + "T00:00:00Z") + 30 * 864e5).toISOString().slice(0, 10);
+  const busy = (await sb.from("booked_slots").select("room_id").in("room_id", [ROOM, OTHER].filter(Boolean))
+    .gte("start_at", `${d}T00:00:00+09:00`).lt("start_at", `${until}T00:00:00+09:00`).limit(1)).data ?? [];
+  date = d;
+  if (!busy.length) break;
+}
 const at = (hm, d = date) => `${d}T${hm}:00+09:00`;
 const book = (s, e, extra = {}) => sb.rpc("create_reservation", {
   p_room_id: ROOM, p_start_at: at(s), p_end_at: at(e),
@@ -191,7 +200,7 @@ if (!has004) {
     r = await a.rpc("is_admin");
     check("is_admin() は true", r.data === true, desc(r));
     r = await a.from("reservations").select("id, name, school, source, status, start_at").eq("room_id", ROOM)
-      .gte("start_at", at("00:00")).lt("start_at", at("23:59")).order("start_at");
+      .gte("start_at", at("00:00")).lt("start_at", at("23:59")).neq("status", "cancelled").is("deleted_at", null).order("start_at");
     check("管理者は名前・学校名・流入元を読める", r.data?.length === 3 && r.data.every((x) => x.name === "__TEST__"), desc(r));
     const main = r.data?.find((x) => x.start_at.includes("06:15")); // 15:15 JST
     r = await a.from("reservations").update({ status: "cancelled" }).eq("id", main?.id).select("status, cancelled_at");
@@ -514,6 +523,32 @@ if (!has004) {
       check("試作用の「2階 練習室A／B」は削除されている", r.data?.length === 0, desc(r));
       r = await sb.from("rooms").select("name, is_public");
       check("一般の人に見える部屋はすべて公開中（1部屋以上）", r.data?.length >= 1 && r.data.every((x) => x.is_public), (r.data ?? []).map((x) => x.name).join(" / "));
+      // 人数（migration 010）
+      const has010 = !(await sb.rpc("public_quote", { p_room_id: ROOM, p_start_at: at("10:00"), p_end_at: at("11:00"), p_people: 2 })).error;
+      if (has010) {
+        console.log("--- 一般の予約画面の人数（migration 010）");
+        const cap = (await a.from("rooms").select("capacity").eq("id", ROOM).single()).data?.capacity;
+        r = await sb.rpc("public_quote", { p_room_id: ROOM, p_start_at: at("10:00"), p_end_at: at("11:00"), p_people: 2 });
+        check("料金は人数で変わる（2人 = 基本＋2人目の追加）", r.data === (S9.public_charge ? taxed(S9.base_per_hour + S9.add_per_person) : null), desc(r));
+        if (cap) {
+          r = await sb.rpc("public_quote", { p_room_id: ROOM, p_start_at: at("10:00"), p_end_at: at("11:00"), p_people: cap + 1 });
+          check("定員を超える人数の料金は返さない (null)", !r.error && r.data === null, desc(r));
+          r = await book("19:00", "19:30", { p_people: cap + 1 });
+          check(`定員（${cap}人）を超える人数の予約は拒否`, r.error?.code === "P0001", desc(r));
+        }
+        r = await book("19:00", "19:30", { p_people: 0 });
+        check("0人の予約は拒否", r.error?.code === "P0001", desc(r));
+        if (OTHER) {
+          r = await book("10:00", "10:30", { p_room_id: OTHER, p_people: 2 });
+          const ppl = r.error ? null : (await a.from("reservations").select("people, price_net").eq("id", r.data).single()).data;
+          check("人数つきで予約でき、人数と料金が記録される", !r.error && ppl?.people === 2
+            && ppl?.price_net === (S9.public_charge ? Math.round((S9.base_per_hour + S9.add_per_person) * 0.5) : 0), r.error ? desc(r) : JSON.stringify(ppl));
+          r = await sb.rpc("create_reservation", { p_room_id: OTHER, p_start_at: at("11:00"), p_end_at: at("12:00"), p_name: "__TEST__" });
+          check("人数を省いた予約（今までの画面）もそのまま使える（1人）", !r.error, desc(r));
+        }
+      } else {
+        console.log("\n⚠ migration 010 が未実行のため、人数のテストはスキップ");
+      }
     } else {
       console.log("\n⚠ migration 009 が未実行のため、一般の料金表示のテストはスキップ");
     }
