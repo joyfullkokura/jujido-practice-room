@@ -70,13 +70,13 @@ export default function Home() {
   const load = useCallback(async () => {
     if (!from || !to) return;
     const { data, error } = await supabase.from("booked_slots")
-      .select("room_id, start_at, end_at")
+      .select("room_id, start_at, end_at, is_maint")
       .lt("start_at", toISO(addDays(to, 1), 0)).gt("end_at", toISO(from, 0));
     setLoadError(!!error);
     if (error) return;
     setBookings((data ?? []).map((b) => {
       const s = fromISO(b.start_at), e = fromISO(b.end_at);
-      return { room_id: b.room_id, date: s.date, start: s.min, end: e.date === s.date ? e.min : 24 * 60 };
+      return { room_id: b.room_id, date: s.date, start: s.min, end: e.date === s.date ? e.min : 24 * 60, maint: !!b.is_maint };
     }));
   }, [from, to]);
 
@@ -119,8 +119,10 @@ export default function Home() {
 
   /** その列（部屋×日）の「予約できない時間帯」 */
   const busyOf = (col: Column): Busy[] => busyList({
-    booked: bookings.filter((b) => b.room_id === col.roomId && b.date === col.date),
-    closed: closedOf(col.roomId, col.date),
+    booked: bookings.filter((b) => b.room_id === col.roomId && b.date === col.date && !b.maint),
+    // メンテナンス・停止は「予約不可」として表示（中身は出さない）
+    closed: [...closedOf(col.roomId, col.date),
+      ...bookings.filter((b) => b.room_id === col.roomId && b.date === col.date && b.maint).map((b) => ({ start: b.start, end: b.end, label: "メンテナンス" }))],
     hours: hoursOf(col.date),
     earliest: earliestBookable(col.date, now),
   });

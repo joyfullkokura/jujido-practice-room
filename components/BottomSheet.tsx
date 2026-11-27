@@ -7,8 +7,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * - 一定距離(120px)かスピード(0.5px/ms)を超えたら閉じる。超えなければ元に戻る
  * - 背景クリック・Esc キーでも閉じる
  */
-export default function BottomSheet({ onClose, label, children }: {
+export default function BottomSheet({ onClose, label, children, wide }: {
   onClose: () => void; label: string; children: React.ReactNode;
+  /** PC で横に広く（入力項目の多いフォーム用） */
+  wide?: boolean;
 }) {
   const sheetRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -93,7 +95,7 @@ export default function BottomSheet({ onClose, label, children }: {
         className="animate-fade-in absolute inset-0 bg-black/40"
         style={{ opacity: backdrop, transition: dragging ? "none" : "opacity 0.2s" }} />
       <div ref={sheetRef}
-        className="animate-sheet-up relative flex max-h-[92dvh] w-full max-w-lg flex-col rounded-t-md border-t border-neutral-200 bg-white"
+        className={`animate-sheet-up relative flex max-h-[92dvh] w-full max-w-lg flex-col ${wide ? "md:max-w-3xl" : ""} rounded-t-md border-t border-neutral-200 bg-white`}
         style={{ transform: `translateY(${offset})`, transition: dragging ? "none" : "transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1)" }}>
         {/* つまみ（ここを持って下げると閉じる） */}
         <div ref={handleRef} className="flex h-6 shrink-0 cursor-grab touch-none items-center justify-center">

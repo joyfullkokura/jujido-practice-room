@@ -4,8 +4,10 @@ import { supabase } from "@/lib/supabase";
 import { addDays, fmtDate, nowJST } from "@/lib/date";
 import { describe, download, explain, fetchReservations, fmtStamp, sourceLabel, toCSV, type ReservationRow, type RoomRow } from "@/lib/admin";
 import { Badge, Button, Field, Notice, inputCls } from "@/components/ui";
+import { CATEGORIES, CATEGORY_KEYS, PAYMENTS, STATUSES, STATUS_KEYS, type Category, type Status as St } from "@/lib/booking";
 
-type Status = "all" | "confirmed" | "cancelled";
+type Status = "all" | St;
+const statusBadge = (s: St) => s === "cancelled" ? <Badge tone="red">キャンセル</Badge> : s === "confirmed" ? <Badge tone="accent">確定</Badge> : <Badge>{STATUSES[s]}</Badge>;
 
 export default function ListTab({ rooms }: { rooms: RoomRow[] }) {
   const today = nowJST().date;
@@ -13,6 +15,7 @@ export default function ListTab({ rooms }: { rooms: RoomRow[] }) {
   const [to, setTo] = useState(addDays(today, 30));
   const [status, setStatus] = useState<Status>("all");
   const [room, setRoom] = useState<number | "all">("all");
+  const [cat, setCat] = useState<Category | "all">("all");
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<ReservationRow[]>([]);
   const [error, setError] = useState("");
@@ -28,10 +31,11 @@ export default function ListTab({ rooms }: { rooms: RoomRow[] }) {
   const shown = useMemo(() => rows.filter((r) =>
     (status === "all" || r.status === status) &&
     (room === "all" || r.room_id === room) &&
-    (!q || `${r.name} ${r.school ?? ""} ${r.source ?? ""}`.includes(q.trim()))), [rows, status, room, q]);
+    (cat === "all" || r.category === cat) &&
+    (!q || `${r.name} ${r.school ?? ""} ${r.source ?? ""} ${r.teacher ?? ""} ${r.course ?? ""}`.includes(q.trim()))), [rows, status, room, cat, q]);
   const roomName = (id: number) => rooms.find((x) => x.id === id)?.name ?? String(id);
 
-  const setRowStatus = async (r: ReservationRow, s: "confirmed" | "cancelled") => {
+  const setRowStatus = async (r: ReservationRow, s: St) => {
     if (s === "cancelled" && !confirm(`${r.name} さんの予約をキャンセルしますか？`)) return;
     const { error } = await supabase.from("reservations").update({ status: s }).eq("id", r.id);
     if (error) return alert(explain(error));
@@ -40,12 +44,19 @@ export default function ListTab({ rooms }: { rooms: RoomRow[] }) {
 
   return (
     <div className="px-4 py-4 md:px-0">
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-[repeat(4,minmax(0,1fr))_minmax(0,1.5fr)]">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-[repeat(5,minmax(0,1fr))_minmax(0,1.5fr)]">
         <Field label="開始日"><input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={inputCls} /></Field>
         <Field label="終了日"><input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={inputCls} /></Field>
         <Field label="状態">
           <select value={status} onChange={(e) => setStatus(e.target.value as Status)} className={inputCls}>
-            <option value="all">すべて</option><option value="confirmed">確定</option><option value="cancelled">キャンセル</option>
+            <option value="all">すべて</option>
+            {STATUS_KEYS.map((k) => <option key={k} value={k}>{STATUSES[k]}</option>)}
+          </select>
+        </Field>
+        <Field label="区分">
+          <select value={cat} onChange={(e) => setCat(e.target.value as Category | "all")} className={inputCls}>
+            <option value="all">すべて</option>
+            {CATEGORY_KEYS.map((k) => <option key={k} value={k}>{CATEGORIES[k].label}</option>)}
           </select>
         </Field>
         <Field label="部屋">
@@ -54,14 +65,14 @@ export default function ListTab({ rooms }: { rooms: RoomRow[] }) {
             {rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
           </select>
         </Field>
-        <Field label="名前・学校・流入元で検索" className="col-span-2 md:col-span-1">
+        <Field label="名前・学校・講師・流入元で検索" className="col-span-2 md:col-span-1">
           <input value={q} onChange={(e) => setQ(e.target.value)} className={inputCls} placeholder="例：○○中" />
         </Field>
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-3 border-b border-neutral-200 pb-3">
         <p className="mr-auto text-sm tabular-nums">
-          {shown.length}件<span className="ml-2 text-neutral-500">（確定 {shown.filter((r) => r.status === "confirmed").length} ／ キャンセル {shown.filter((r) => r.status === "cancelled").length}）</span>
+          {shown.length}件<span className="ml-2 text-neutral-500">（{STATUS_KEYS.map((k) => `${STATUSES[k]} ${shown.filter((r) => r.status === k).length}`).join(" ／ ")}）</span>
         </p>
         <Button onClick={() => download(`reservations_${from}_${to}.csv`, toCSV(shown, rooms))} disabled={!shown.length}>CSV ダウンロード</Button>
       </div>
@@ -75,12 +86,13 @@ export default function ListTab({ rooms }: { rooms: RoomRow[] }) {
             <li key={r.id} className="py-3">
               <div className="flex items-center gap-2 text-sm tabular-nums">
                 <span className={`font-semibold ${r.status === "cancelled" ? "text-neutral-400 line-through" : ""}`}>{fmtDate(d.date)} {d.time}</span>
-                {r.status === "cancelled" && <Badge tone="red">キャンセル</Badge>}
+                {statusBadge(r.status)}
               </div>
               <p className="mt-0.5 text-base font-semibold">{r.name}<span className="ml-2 text-sm font-normal text-neutral-600">{r.school}</span></p>
-              <p className="mt-0.5 text-xs text-neutral-500">{roomName(r.room_id)}　流入元: {sourceLabel(r.source) || "—"}　作成: {fmtStamp(r.created_at)}</p>
+              <p className="mt-0.5 text-xs text-neutral-500">{roomName(r.room_id)}　{CATEGORIES[r.category]?.label}{r.teacher ? `　講師 ${r.teacher}` : ""}　{PAYMENTS[r.payment]}</p>
+              <p className="mt-0.5 text-xs text-neutral-500">流入元: {sourceLabel(r.source) || "—"}　作成: {fmtStamp(r.created_at)}</p>
               <div className="mt-2">
-                {r.status === "confirmed"
+                {r.status !== "cancelled"
                   ? <Button variant="danger" className="h-9" onClick={() => setRowStatus(r, "cancelled")}>キャンセル</Button>
                   : <Button className="h-9" onClick={() => setRowStatus(r, "confirmed")}>キャンセルを取り消す</Button>}
               </div>
@@ -93,7 +105,7 @@ export default function ListTab({ rooms }: { rooms: RoomRow[] }) {
       <table className="hidden w-full text-sm md:table">
         <thead>
           <tr className="border-b border-neutral-200 text-left text-xs text-neutral-500">
-            {["日付", "時間", "部屋", "名前", "学校名", "流入元", "作成日時", "状態", ""].map((h) => <th key={h} className="py-2 pr-3 font-semibold">{h}</th>)}
+            {["日付", "時間", "部屋", "区分", "名前", "学校名", "講師", "支払", "流入元", "作成日時", "状態", ""].map((h) => <th key={h} className="py-2 pr-3 font-semibold">{h}</th>)}
           </tr>
         </thead>
         <tbody className="divide-y divide-neutral-200">
@@ -105,13 +117,16 @@ export default function ListTab({ rooms }: { rooms: RoomRow[] }) {
                 <td className="py-2 pr-3 tabular-nums">{fmtDate(d.date)}</td>
                 <td className="py-2 pr-3 tabular-nums">{d.time}</td>
                 <td className="py-2 pr-3">{roomName(r.room_id)}</td>
+                <td className="py-2 pr-3"><span className="flex items-center gap-1.5"><i className="h-3 w-1 shrink-0 rounded-xs" style={{ background: CATEGORIES[r.category]?.color }} />{CATEGORIES[r.category]?.label}</span></td>
                 <td className="py-2 pr-3 font-semibold">{r.name}</td>
                 <td className="py-2 pr-3">{r.school}</td>
+                <td className="py-2 pr-3">{r.teacher}</td>
+                <td className={`py-2 pr-3 ${r.payment === "unpaid" && r.status !== "cancelled" ? "text-red-700" : ""}`}>{PAYMENTS[r.payment]}</td>
                 <td className="py-2 pr-3">{sourceLabel(r.source)}</td>
                 <td className="py-2 pr-3 tabular-nums text-neutral-500">{fmtStamp(r.created_at)}</td>
-                <td className="py-2 pr-3">{r.status === "cancelled" ? <Badge tone="red">キャンセル</Badge> : <Badge tone="accent">確定</Badge>}</td>
+                <td className="py-2 pr-3">{statusBadge(r.status)}</td>
                 <td className="py-2 text-right">
-                  {r.status === "confirmed"
+                  {r.status !== "cancelled"
                     ? <Button variant="danger" className="h-8 px-3" onClick={() => setRowStatus(r, "cancelled")}>キャンセル</Button>
                     : <Button className="h-8 px-3" onClick={() => setRowStatus(r, "confirmed")}>取り消す</Button>}
                 </td>

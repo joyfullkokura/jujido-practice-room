@@ -10,7 +10,7 @@ export type Room = {
 };
 
 /** 予約済みの時間帯（booked_slots から。個人情報なし） */
-export type Booking = { room_id: number; date: string; start: number; end: number };
+export type Booking = { room_id: number; date: string; start: number; end: number; maint?: boolean };
 
 /** 選択中の予約内容 */
 export type Selection = { roomId: number; date: string; start: number; end: number };

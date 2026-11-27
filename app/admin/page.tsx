@@ -11,7 +11,7 @@ import RoomsTab from "@/components/admin/RoomsTab";
 import HoursTab from "@/components/admin/HoursTab";
 
 const TABS = [
-  { key: "day", label: "予約（日）" },
+  { key: "day", label: "予約表" },
   { key: "list", label: "一覧・CSV" },
   { key: "closures", label: "予約不可" },
   { key: "rooms", label: "部屋" },
@@ -91,7 +91,7 @@ function AdminShell({ email }: { email: string }) {
         </nav>
       </header>
       <main className="mx-auto max-w-6xl pb-24 md:px-8">
-        {tab === "day" && <DayTab rooms={rooms} />}
+        {tab === "day" && <DayTab rooms={rooms} staff={email.split("@")[0]} />}
         {tab === "list" && <ListTab rooms={rooms} />}
         {tab === "closures" && <ClosuresTab rooms={rooms} />}
         {tab === "rooms" && <RoomsTab rooms={rooms} reload={reloadRooms} />}

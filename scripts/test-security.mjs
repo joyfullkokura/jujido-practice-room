@@ -85,9 +85,21 @@ r = await sb.from("reservations").select("name, school, source");
 check("reservations の名前・学校名は読めない", denied(r), desc(r));
 r = await sb.from("reservations").select("id");
 check("reservations はどの列も読めない", denied(r), desc(r));
+const has005 = !(await sb.from("booked_slots").select("is_maint").limit(1)).error;
 r = await sb.from("booked_slots").select("*").limit(1);
 const cols = Object.keys(r.data?.[0] ?? {}).sort().join(",");
-check("booked_slots の列は room_id/start_at/end_at だけ", cols === "end_at,room_id,start_at", cols);
+check(has005 ? "booked_slots の列は room_id/start_at/end_at/is_maint だけ（名前・講師・区分などは出ない）" : "booked_slots の列は room_id/start_at/end_at だけ",
+  cols === (has005 ? "end_at,is_maint,room_id,start_at" : "end_at,room_id,start_at"), cols);
+if (has005) {
+  r = await sb.from("reservations").select("category, teacher, contact, note");
+  check("reservations の区分・講師・連絡先・備考は読めない", denied(r), desc(r));
+  r = await sb.from("rooms").select("id, sales_target, target_rate");
+  check("一般の人は部屋の売上目標・目標稼働率を読めない", !!r.error, desc(r));
+  r = await sb.from("rooms").select("id, name, instruments, is_hall");
+  check("一般の人も公開中の部屋の常設楽器は読める", !r.error && r.data?.length >= 1, desc(r));
+  r = await sb.rpc("create_reservation", { p_room_id: ROOM, p_start_at: at("19:00"), p_end_at: at("20:00"), p_name: "__TEST__", p_category: "lesson" });
+  check("一般の予約で区分は指定できない（そういう引数はない）", !!r.error, desc(r));
+}
 r = await sb.schema("backup").from("reservations_003").select("name").limit(1);
 check("バックアップ（backup スキーマ）は読めない", denied(r), desc(r));
 
@@ -148,6 +160,12 @@ if (!has004) {
     } else {
     r = await u.from("reservations").select("name, school").gte("start_at", at("00:00"));
     check("予約の名前・学校名は読めない", denied(r), desc(r));
+    if (has005) {
+      r = await u.from("reservations").select("contact, teacher, note");
+      check("連絡先・講師・備考は読めない", denied(r), desc(r));
+      r = await u.from("reservations").update({ category: "maint" }).gte("start_at", at("00:00")).select();
+      check("区分を書き換えられない", denied(r), desc(r));
+    }
     r = await u.from("reservations").update({ status: "cancelled" }).gte("start_at", at("00:00")).select();
     check("予約をキャンセルできない", denied(r), desc(r));
     r = await u.from("reservations").insert({ room_id: ROOM, start_at: at("19:00"), end_at: at("20:00"), name: "__TEST__" });
@@ -222,6 +240,61 @@ if (!has004) {
     const cur = (await a.from("business_hours").select("open_time, close_time, is_closed").eq("weekday", wd)).data?.[0];
     r = await a.from("business_hours").update(cur).eq("weekday", wd).select();
     check("営業時間を更新できる（同じ値で上書きして確認）", r.data?.length === 1, desc(r));
+    if (has005) {
+      console.log("--- 管理者：予約の区分・項目（migration 005）");
+      const pub = (await a.from("reservations").select("category, people, payment, status").eq("id", main?.id)).data?.[0];
+      check("一般の予約は「一般貸出・1人・未払い」で入る", pub?.category === "rental" && pub?.people === 1 && pub?.payment === "unpaid", JSON.stringify(pub));
+      const ins = (row) => a.from("reservations").insert({ room_id: ROOM, name: "__TEST__", ...row }).select("id, deleted_at");
+      r = await ins({ start_at: at("10:00"), end_at: at("11:00"), category: "lesson", teacher: "テスト講師", course: "ピアノ初級",
+        people: 2, contact: "000-0000-0000", staff: "test", note: "テスト", payment: "free" });
+      const lesson = r.data?.[0]?.id;
+      check("レッスン（講師・コース・人数・連絡先・受付担当・備考つき）を登録できる", !!lesson, desc(r));
+      check("レッスンも一般の画面では「予約済」の時間帯として見える", (await ranges()).includes("10:00-11:00"), await ranges());
+      r = await sb.from("booked_slots").select("is_maint").eq("room_id", ROOM).eq("start_at", at("10:00"));
+      check("レッスンは is_maint=false（中身は見えない）", r.data?.[0]?.is_maint === false, desc(r));
+      r = await book("10:30", "11:30");
+      check("区分が違っても重なる一般予約は拒否 (23P01)", r.error?.code === "23P01", desc(r));
+      r = await ins({ start_at: at("11:00"), end_at: at("12:00"), category: "rental", status: "tentative" });
+      check("仮予約を登録できる", !!r.data?.[0]?.id, desc(r));
+      r = await book("11:30", "12:00");
+      check("仮予約の時間も一般の予約を拒否 (23P01)", r.error?.code === "23P01", desc(r));
+      r = await ins({ start_at: at("11:45"), end_at: at("12:15"), category: "event" });
+      check("仮予約と重なる管理者の登録も拒否 (23P01)", r.error?.code === "23P01", desc(r));
+      r = await ins({ start_at: at("12:00"), end_at: at("13:00"), category: "maint" });
+      const maint = r.data?.[0]?.id;
+      check("メンテナンス・停止を登録できる", !!maint, desc(r));
+      r = await sb.from("booked_slots").select("is_maint").eq("room_id", ROOM).eq("start_at", at("12:00"));
+      check("メンテナンスは一般の画面で is_maint=true", r.data?.[0]?.is_maint === true, desc(r));
+      r = await ins({ start_at: at("13:00"), end_at: at("13:30"), category: "xxx" });
+      check("存在しない区分は拒否 (23514)", r.error?.code === "23514", desc(r));
+      r = await ins({ start_at: at("13:00"), end_at: at("13:30"), status: "foo" });
+      check("存在しない予約状況は拒否 (23514)", r.error?.code === "23514", desc(r));
+      r = await ins({ start_at: at("13:00"), end_at: at("13:30"), payment: "maybe" });
+      check("存在しない支払状況は拒否 (23514)", r.error?.code === "23514", desc(r));
+      r = await a.from("reservations").update({ status: "used" }).eq("id", lesson).select("status");
+      check("利用済みにできる", r.data?.[0]?.status === "used", desc(r));
+      check("利用済みも時間を占める", (await ranges()).includes("10:00-11:00"), await ranges());
+      r = await a.from("reservations").update({ start_at: at("11:30"), end_at: at("12:30") }).eq("id", lesson).select();
+      check("ほかの予約に重なる時間への変更は拒否 (23P01)", r.error?.code === "23P01", desc(r));
+      r = await a.from("reservations").update({ source: "x" }).eq("id", lesson).select();
+      check("管理者でも流入元は書き換えられない", !!r.error, desc(r));
+      r = await a.from("reservations").update({ deleted_at: "2000-01-01T00:00:00Z" }).eq("id", maint).select("deleted_at");
+      const delAt = r.data?.[0]?.deleted_at;
+      check("削除できる（削除日時は DB が今の時刻で記録）", !!delAt && !delAt.startsWith("2000"), desc(r));
+      check("削除した枠は一般の画面から消える", !(await ranges()).includes("12:00-13:00"), await ranges());
+      r = await book("12:00", "12:30");
+      check("削除した枠の時間は予約できる", !r.error, desc(r));
+      r = await a.from("reservations").select("id").eq("id", maint).not("deleted_at", "is", null);
+      check("削除した予約も行は残っている（管理者は確認できる）", r.data?.length === 1, desc(r));
+
+      r = await a.from("rooms").select("name, is_hall, capacity, instruments, target_rate, sales_target")
+        .in("name", ["L-1", "M-3", "L-2", "S-5", "M-2", "M-1", "S-6", "ホール"]);
+      check("8教室が入っている", r.data?.length === 8, desc(r));
+      check("ホールは is_hall=true・定員30", r.data?.some((x) => x.name === "ホール" && x.is_hall && x.capacity === 30), desc(r));
+      check("管理者は目標稼働率・売上目標を読める", r.data?.every((x) => typeof x.target_rate === "number" && typeof x.sales_target === "number"), desc(r));
+    } else {
+      console.log("\n⚠ migration 005 が未実行のため、予約の区分・項目のテストはスキップ");
+    }
     r = await a.from("admins").insert({ user_id: "00000000-0000-0000-0000-000000000000" });
     check("管理者でも API から管理者を追加できない（SQL Editor のみ）", !!r.error, desc(r));
     await a.auth.signOut();
