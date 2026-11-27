@@ -1,13 +1,14 @@
+// 区分の色は色覚の違いがあっても隣どうしを見分けられる組み合わせ（dataviz の検証スクリプトで確認済み）
 // 教室管理の予約項目（区分・予約状況・支払状況）の定義。画面と CSV で同じ表示を使う
 
 export const CATEGORIES = {
-  lesson:   { label: "通常レッスン",         color: "#4a6491" },
-  rental:   { label: "一般貸出",             color: "#4f7d5e" },
-  pass:     { label: "月イチ楽器パスポート", color: "#9a6a3e" },
-  trial:    { label: "無料体験",             color: "#8a7a2e" },
-  event:    { label: "イベント・発表会",     color: "#755d8f" },
-  internal: { label: "社内利用",             color: "#6b6b6b" },
-  maint:    { label: "メンテナンス・停止",   color: "#9a4f4f" },
+  lesson:   { label: "通常レッスン",         color: "#2a78d6" },
+  rental:   { label: "一般貸出",             color: "#eb6834" },
+  pass:     { label: "月イチ楽器パスポート", color: "#1baf7a" },
+  trial:    { label: "無料体験",             color: "#eda100" },
+  event:    { label: "イベント・発表会",     color: "#e87ba4" },
+  internal: { label: "社内利用",             color: "#6250d6" },
+  maint:    { label: "メンテナンス・停止",   color: "#e34948" },
 } as const;
 export type Category = keyof typeof CATEGORIES;
 export const CATEGORY_KEYS = Object.keys(CATEGORIES) as Category[];

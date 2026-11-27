@@ -383,6 +383,62 @@ async function trackPoint(page, room, time) {
   await ctx.close();
 }
 
+// ───────── 管理画面：売上・ダッシュボード・レポート（フェーズ③） ─────────
+// サンプル（2026年11月・営業時間は既定 10:00〜21:00 で毎日営業・5部屋）
+//   有効な予約 7件（キャンセル1件は除く）：一般貸出 90分×2（税込1,650 未払い／1,650 支払済）、メンテ 60分、レッスン60・パスポート60（利用済み）・体験90・イベント120
+//   分母 = 30日 × 12時間 × 5部屋 − 予約不可(20-21時×5部屋) − メンテ60分 = 107,640分、予定 510分 → 0.5%
+{
+  const ctx = await browser.newContext({ viewport: { width: 1366, height: 900 }, locale: "ja-JP", timezoneId: "Asia/Tokyo" });
+  const page = await ctx.newPage();
+  await page.clock.setFixedTime(new Date(NOW));
+  await openAdmin(page, url);
+  const tab = async (name) => { await page.getByRole("button", { name, exact: true }).click(); await page.waitForTimeout(700); };
+
+  console.log("--- 管理画面：ダッシュボード");
+  await tab("ダッシュボード");
+  const kpi = (await page.getByTestId("kpi").textContent()) ?? "";
+  check("稼働率（予定）0.5%・実績 0.1%", kpi.includes("稼働率（予定）0.5%実績 0.1%"), kpi.slice(0, 40));
+  check("貸出売上 ¥3,300・2件、入金済 ¥1,650・未収 ¥1,650", kpi.includes("貸出売上（税込）・2件¥3,300") && kpi.includes("¥1,650未収 ¥1,650"), kpi);
+  check("利用時間 8.5h（予約 510分）", kpi.includes("8.5h"), kpi);
+  check("前月・前年同月はデータなし", await page.getByText("前月 データなし　／　前年同月 データなし").count() === 1);
+  const cat = (await page.getByRole("list", { name: "区分別の利用時間" }).textContent()) ?? "";
+  check("区分別：一般貸出 3h（35%）・イベント 2h（24%）", cat.includes("一般貸出3h（35%）") && cat.includes("イベント・発表会2h（24%）"), cat.slice(0, 80));
+  check("区分別にメンテナンスは入らない", !cat.includes("メンテナンス"));
+  check("ヒートマップ：金曜11時台 = (60+30)分 ÷ (5部屋×60分×4日) = 7.5%", await page.locator('td[title="金曜 11時台：7.5%"]').count() === 1);
+  check("ヒートマップ：金曜20時台は利用なし 0.0%", await page.locator('td[title="金曜 20時台：0.0%"]').count() === 1);
+  const rank = (await page.getByRole("list", { name: "貸出売上ランキング" }).locator("li").first().textContent()) ?? "";
+  check("売上ランキング1位は 2階 練習室A ¥3,300", rank.includes("2階 練習室A") && rank.includes("¥3,300"), rank);
+  const src = (await page.getByRole("list", { name: "流入元別の予約件数" }).locator("li").first().textContent()) ?? "";
+  check("流入元別：電話・店頭（管理者）5件が最多", src.includes("電話・店頭（管理者）") && src.includes("5件"), src);
+  check("学校別：○○中学校 1件", ((await page.getByRole("list", { name: "学校別の予約件数" }).textContent()) ?? "").includes("○○中学校1件"));
+  const room = (await page.getByRole("list", { name: "部屋別の稼働率" }).locator("li").first().textContent()) ?? "";
+  check("部屋別：練習室A 予定 180分 ÷ 21,540分 = 0.8%・目標 40%", room.includes("予定 0.8%") && room.includes("目標 40%"), room);
+  await page.emulateMedia({ media: "print" });
+  check("印刷時はヘッダー・操作ボタンを隠す", !(await page.locator("header").isVisible()) && !(await page.getByRole("button", { name: "印刷・PDF 保存" }).isVisible()));
+  await page.emulateMedia({ media: "screen" });
+
+  console.log("--- 管理画面：売上");
+  await tab("売上");
+  const sumText = async () => (await page.locator("dl").first().textContent()) ?? "";
+  check("一般貸出だけが並ぶ（2件・合計 ¥3,300）", await page.locator("tbody tr").count() === 2 && (await page.locator("tfoot").textContent()).includes("¥3,300"));
+  check("未払いの行は強調される", await page.locator("tr[data-unpaid]").count() === 1 && (await page.locator("tr[data-unpaid]").textContent()).includes("山田 太郎"));
+  await page.getByLabel("山田 太郎 の支払状況").selectOption("paid");
+  await page.waitForTimeout(400);
+  check("支払済にすると未収が ¥0 になる", (await sumText()).includes("未収¥0"), await sumText());
+  await page.getByLabel("未払いだけ").check();
+  check("「未払いだけ」で絞り込める", await page.locator("tbody tr").count() === 0);
+
+  console.log("--- 管理画面：レポート");
+  await tab("レポート");
+  const rows = page.getByRole("table", { name: "教室利用予定表" }).locator("tbody tr");
+  check("その日の予約が時刻順に並ぶ（キャンセルは除く 7件）", await rows.count() === 7 && (await rows.first().textContent()).startsWith("10:00〜11:30"));
+  page.once("dialog", (d) => d.accept());
+  await page.getByRole("button", { name: "この日の確定をすべて利用済みにする" }).click();
+  await page.waitForTimeout(500);
+  check("「確定」5件をまとめて利用済みにできる", await page.getByText("5件を利用済みにしました。").count() === 1);
+  await ctx.close();
+}
+
 await browser.close();
 console.log(`\n結果: ${ok} 件OK / ${ng} 件NG`);
 process.exit(ng ? 1 : 0);

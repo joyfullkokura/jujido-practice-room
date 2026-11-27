@@ -47,6 +47,14 @@ for (const [name, opts] of [["pc", { viewport: { width: 1366, height: 900 } }], 
   await page.getByRole("button", { name: "料金", exact: true }).click();
   await page.waitForTimeout(500);
   await page.screenshot({ path: `${out}/${name}-8-prices.png`, fullPage: true });
+  for (const [tab, file] of [["ダッシュボード", "9-dashboard"], ["売上", "10-sales"], ["レポート", "11-report"]]) {
+    await page.getByRole("button", { name: tab, exact: true }).click();
+    await page.waitForTimeout(800);
+    await page.screenshot({ path: `${out}/${name}-${file}.png`, fullPage: true });
+  }
+  await page.emulateMedia({ media: "print" });
+  await page.screenshot({ path: `${out}/${name}-12-report-print.png`, fullPage: true });
+  await page.emulateMedia({ media: "screen" });
   for (const [tab, file] of [["一覧・CSV", "3-list"], ["部屋", "4-rooms"]]) {
     await page.getByRole("button", { name: tab, exact: true }).click();
     await page.waitForTimeout(600);

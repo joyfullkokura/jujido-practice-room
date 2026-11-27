@@ -28,8 +28,8 @@ export const R = (room_id, s, e, name, o = {}) => ({
 });
 // 練習室A: 11:00-12:30 仮予約（一般貸出）、17:15-18:45 確定 ／ B: 13:00-14:00 メンテナンス ／ L-1: 16:00-17:00 レッスン
 export const RESERVATIONS = [
-  R(1, "11:00", "12:30", "山田 太郎", { status: "tentative", school: "○○中学校", source: "○○中" }),
-  R(1, "17:15", "18:45", "佐藤 花子", { school: "△△高校", source: "△△高" }),
+  R(1, "11:00", "12:30", "山田 太郎", { status: "tentative", school: "○○中学校", source: "○○中", price_net: 1500, price_total: 1650 }),
+  R(1, "17:15", "18:45", "佐藤 花子", { school: "△△高校", source: "△△高", payment: "paid", price_net: 1500, price_total: 1650 }),
   R(2, "13:00", "14:00", "ピアノ調律", { category: "maint", payment: "free" }),
   R(3, "16:00", "17:00", "生徒 12", { category: "lesson", teacher: "高山", course: "ピアノ初級", payment: "free", series_id: "s1" }),
   R(3, "17:00", "18:00", "生徒 5", { category: "pass", teacher: "三吉", payment: "free", status: "used" }),

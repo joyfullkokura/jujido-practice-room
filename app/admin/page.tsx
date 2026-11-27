@@ -11,10 +11,16 @@ import RoomsTab from "@/components/admin/RoomsTab";
 import HoursTab from "@/components/admin/HoursTab";
 import SearchTab, { type SearchPick } from "@/components/admin/SearchTab";
 import PricesTab from "@/components/admin/PricesTab";
+import SalesTab from "@/components/admin/SalesTab";
+import DashboardTab from "@/components/admin/DashboardTab";
+import ReportTab from "@/components/admin/ReportTab";
 
 const TABS = [
   { key: "day", label: "予約表" },
   { key: "search", label: "空き教室検索" },
+  { key: "sales", label: "売上" },
+  { key: "dashboard", label: "ダッシュボード" },
+  { key: "report", label: "レポート" },
   { key: "list", label: "一覧・CSV" },
   { key: "closures", label: "予約不可" },
   { key: "rooms", label: "部屋" },
@@ -76,7 +82,7 @@ function AdminShell({ email }: { email: string }) {
 
   return (
     <div className="min-h-dvh bg-white">
-      <header ref={headerRef} className="sticky top-0 z-30 border-b border-neutral-200 bg-white">
+      <header ref={headerRef} className="sticky top-0 z-30 border-b border-neutral-200 bg-white print:hidden">
         <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 pt-3 md:px-8">
           <div className="mr-auto min-w-0">
             <p className="text-xs text-neutral-500">十字堂楽器店 練習室予約</p>
@@ -97,6 +103,9 @@ function AdminShell({ email }: { email: string }) {
       </header>
       <main className="mx-auto max-w-6xl pb-24 md:px-8">
         {tab === "day" && <DayTab rooms={rooms} staff={email.split("@")[0]} pick={pick} onPickUsed={() => setPick(null)} />}
+        {tab === "sales" && <SalesTab rooms={rooms} />}
+        {tab === "dashboard" && <DashboardTab rooms={rooms} />}
+        {tab === "report" && <ReportTab rooms={rooms} />}
         {tab === "search" && <SearchTab rooms={rooms} onBook={(p) => { setPick(p); setTab("day"); }} />}
         {tab === "list" && <ListTab rooms={rooms} />}
         {tab === "closures" && <ClosuresTab rooms={rooms} />}

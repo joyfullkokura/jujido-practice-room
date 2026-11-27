@@ -23,12 +23,18 @@ export type RoomRow = {
 };
 export const ROOM_COLS = "id, name, color, capacity, description, sort_order, is_public, instruments, is_hall, target_rate, sales_target";
 
-/** 期間内の予約（削除したものは除く） */
-export async function fetchReservations(from: string, to: string) {
-  return supabase.from("reservations").select(RESERVATION_COLS)
-    .gte("start_at", toISO(from, 0)).lt("start_at", toISO(addDays(to, 1), 0))
-    .is("deleted_at", null)
-    .order("start_at").returns<ReservationRow[]>();
+/** 期間内の予約（削除したものは除く）。1回に1000件までしか返らないので、分けて全部読む */
+export async function fetchReservations(from: string, to: string): Promise<{ data: ReservationRow[] | null; error: { code?: string; message: string } | null }> {
+  const all: ReservationRow[] = [];
+  for (let i = 0; ; i += 1000) {
+    const { data, error } = await supabase.from("reservations").select(RESERVATION_COLS)
+      .gte("start_at", toISO(from, 0)).lt("start_at", toISO(addDays(to, 1), 0))
+      .is("deleted_at", null)
+      .order("start_at").order("id").range(i, i + 999).returns<ReservationRow[]>();
+    if (error) return { data: null, error };
+    all.push(...(data ?? []));
+    if (!data || data.length < 1000) return { data: all, error: null };
+  }
 }
 
 export async function fetchAllRooms() {
