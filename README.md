@@ -12,6 +12,7 @@ Next.js 16 (App Router) + Supabase + Tailwind CSS。本番: https://jujido-pract
 5. `supabase/migrations/004_admin.sql` … 管理者（admins / is_admin）、営業時間、予約不可枠
 6. `supabase/migrations/005_booking_fields.sql` … 予約の区分・講師・コース・人数・支払状況など、仮予約／利用済み、削除（論理削除）、8教室（非公開）
 7. `supabase/migrations/006_pricing_series.sql` … 料金設定・ホール楽器、料金計算（quote_price）と予約への記録、定期レッスン（create_series）、空き教室検索（search_free_rooms）
+8. `supabase/migrations/007_revoke_anon_functions.sql` … 管理者用の関数（料金計算・定期登録・空き検索）を一般の人から呼べないようにする
 
 管理者の追加（SQL Editor）: `insert into admins (user_id) select id from auth.users where email = '…' on conflict do nothing;`
 
