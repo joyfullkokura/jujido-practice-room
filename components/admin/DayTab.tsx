@@ -8,11 +8,16 @@ import { describe, explain, fetchReservations, type ReservationRow, type RoomRow
 import Timeline, { type TLRow } from "@/components/admin/Timeline";
 import BookingEditor, { draftOf, newDraft, type Draft } from "@/components/admin/BookingEditor";
 import { Button, Notice, inputCls } from "@/components/ui";
+import type { SearchPick } from "@/components/admin/SearchTab";
 
 /** 管理画面の予約表は 9:00〜21:00 を基本に、営業時間がそれより広ければ広げる */
 const BASE = { open: 9 * 60, close: 21 * 60 };
 
-export default function DayTab({ rooms, staff }: { rooms: RoomRow[]; staff: string }) {
+export default function DayTab({ rooms, staff, pick, onPickUsed }: {
+  rooms: RoomRow[]; staff: string;
+  /** 空き教室検索から「予約へ」で来たとき：その日を開いて一般貸出の新規予約フォームを出す */
+  pick?: SearchPick | null; onPickUsed?: () => void;
+}) {
   const [now, setNow] = useState(nowJST);
   const [date, setDate] = useState(() => nowJST().date);
   const [rows, setRows] = useState<ReservationRow[]>([]);
@@ -23,6 +28,12 @@ export default function DayTab({ rooms, staff }: { rooms: RoomRow[]; staff: stri
   const range = { open: Math.min(BASE.open, shopRange.open), close: Math.max(BASE.close, shopRange.close) };
 
   useEffect(() => { const t = setInterval(() => setNow(nowJST()), 30_000); return () => clearInterval(t); }, []);
+  useEffect(() => {
+    if (!pick) return;
+    setDate(pick.date);
+    setEditing(newDraft({ ...pick, staff, category: "rental" }));
+    onPickUsed?.();
+  }, [pick, staff, onPickUsed]);
 
   const load = useCallback(async () => {
     const { data, error } = await fetchReservations(date, date);

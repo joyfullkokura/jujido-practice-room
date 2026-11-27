@@ -18,6 +18,35 @@ for (const [name, opts] of [["pc", { viewport: { width: 1366, height: 900 } }], 
   await page.waitForTimeout(500);
   await page.screenshot({ path: `${out}/${name}-2-edit.png` });
   await page.keyboard.press("Escape"); await page.waitForTimeout(400);
+  // ホールの一般貸出（追加楽器・料金）
+  const track = page.locator('[data-track="5"]');
+  await track.evaluate((el) => { el.closest("[data-timeline]").scrollLeft = 520; });
+  const b = await track.boundingBox();
+  await page.mouse.click(b.x + (16 * 60 - 540) * (20 / 15) + 7, b.y + b.height / 2);
+  await page.waitForTimeout(400);
+  const dlg = page.getByRole("dialog");
+  await dlg.getByLabel("予約区分").selectOption("rental");
+  await dlg.getByRole("checkbox", { name: /グランドピアノ/ }).check();
+  await page.waitForTimeout(500);
+  await dlg.getByTestId("price").scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `${out}/${name}-5-hall-price.png` });
+  // 定期レッスンの確認
+  await dlg.getByLabel("予約区分").selectOption("lesson");
+  await dlg.getByLabel("利用者名・団体名（必須）").fill("生徒 7");
+  await dlg.getByLabel("繰り返し", { exact: true }).selectOption("7");
+  await dlg.getByLabel("繰り返しの終了日").fill("2026-12-25");
+  await dlg.getByRole("button", { name: "登録する日を確認" }).click();
+  await page.waitForTimeout(400);
+  await dlg.getByTestId("series-plan").scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `${out}/${name}-6-series.png` });
+  await page.keyboard.press("Escape"); await page.waitForTimeout(400);
+  await page.getByRole("button", { name: "空き教室検索", exact: true }).click();
+  await page.getByRole("button", { name: "検索", exact: true }).click();
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: `${out}/${name}-7-search.png`, fullPage: true });
+  await page.getByRole("button", { name: "料金", exact: true }).click();
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: `${out}/${name}-8-prices.png`, fullPage: true });
   for (const [tab, file] of [["一覧・CSV", "3-list"], ["部屋", "4-rooms"]]) {
     await page.getByRole("button", { name: tab, exact: true }).click();
     await page.waitForTimeout(600);

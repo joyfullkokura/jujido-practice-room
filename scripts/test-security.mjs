@@ -295,6 +295,133 @@ if (!has004) {
     } else {
       console.log("\n⚠ migration 005 が未実行のため、予約の区分・項目のテストはスキップ");
     }
+    const has006 = !(await a.from("price_settings").select("id").limit(1)).error;
+    if (has006) {
+      console.log("--- 料金・定期レッスン・空き教室検索（migration 006）");
+      const plus = (n) => new Date(Date.parse(date + "T00:00:00Z") + n * 864e5).toISOString().slice(0, 10);
+      const seriesArgs = (o = {}) => ({ p_room_id: ROOM, p_first: date, p_start_min: 600, p_end_min: 660, p_every_days: 7, p_until: plus(28),
+        p_fields: { name: "__TEST__", course: "__SERIES__", category: "lesson" }, p_dry_run: true, ...o });
+      const searchArgs = (o = {}) => ({ p_date: date, p_start_min: 15 * 60 + 30, p_minutes: 60, p_people: 1, p_keyword: "", ...o });
+
+      // 一般の人
+      r = await sb.from("price_settings").select("*");
+      check("一般の人は料金設定を読めない", denied(r), desc(r));
+      r = await sb.from("price_settings").update({ tax_rate: 0 }).eq("id", 1).select();
+      check("一般の人は料金設定を変えられない", denied(r), desc(r));
+      r = await sb.from("hall_extras").insert({ name: "__TEST__" });
+      check("一般の人はホールの楽器を追加できない", !!r.error, desc(r));
+      r = await sb.rpc("quote_price", { p_category: "rental", p_room_id: ROOM, p_start_at: at("10:00"), p_end_at: at("11:00") });
+      check("一般の人は料金計算の関数を呼べない", !!r.error, desc(r));
+      r = await sb.rpc("create_series", seriesArgs({ p_dry_run: false }));
+      check("一般の人は定期登録を使えない", !!r.error, desc(r));
+      r = await sb.rpc("search_free_rooms", searchArgs());
+      check("一般の人は空き教室検索（管理者用）を使えない", !!r.error, desc(r));
+      // ログインしているだけのユーザー
+      const { c: u2 } = await login(env.TEST_USER_EMAIL, env.TEST_USER_PASSWORD);
+      if ((await u2.rpc("is_admin")).data === false) {
+        r = await u2.from("price_settings").update({ tax_rate: 0 }).eq("id", 1).select();
+        check("管理者でないユーザーは料金設定を変えられない", denied(r), desc(r));
+        r = await u2.rpc("create_series", seriesArgs({ p_dry_run: false }));
+        check("管理者でないユーザーは定期登録を使えない", !!r.error, desc(r));
+        r = await u2.rpc("search_free_rooms", searchArgs());
+        check("管理者でないユーザーは空き教室検索を使えない", !!r.error, desc(r));
+      }
+      await u2.auth.signOut();
+
+      // 料金計算（DB の quote_price）。期待値は今の料金設定から同じ式で計算
+      const S = (await a.from("price_settings").select("*").eq("id", 1).single()).data;
+      const tax = (net) => Math.round((net * S.tax_rate) / 100);
+      const qp = async (o = {}) => (await a.rpc("quote_price", { p_category: "rental", p_room_id: ROOM, p_start_at: at("10:00"), p_end_at: at("11:30"),
+        p_people: 2, p_extras: [], p_discount: 0, p_override: null, ...o })).data?.[0];
+      const base15 = Math.round((S.base_per_hour + S.add_per_person) * 1.5);
+      let q = await qp();
+      check(`一般教室 2人 1時間30分 = (基本+追加)×1.5 = 税抜 ${base15}`, q?.net === base15 && q?.tax === tax(base15) && q?.total === base15 + tax(base15), JSON.stringify(q));
+      q = await qp({ p_discount: 100 });
+      check("割引は税抜から引く", q?.net === Math.max(0, base15 - 100), JSON.stringify(q));
+      q = await qp({ p_discount: 9999999 });
+      check("割引が大きすぎても 0円未満にならない", q?.net === 0 && q?.total === 0, JSON.stringify(q));
+      q = await qp({ p_override: 1234, p_discount: 100 });
+      check("手動修正があればその額（割引より優先）", q?.net === 1234 && q?.total === 1234 + tax(1234), JSON.stringify(q));
+      q = await qp({ p_category: "lesson" });
+      check("一般貸出以外は 0円", q?.total === 0, JSON.stringify(q));
+      const hall = (await a.from("rooms").select("id").eq("is_hall", true).limit(1)).data?.[0]?.id;
+      const tmp = (await a.from("hall_extras").insert([{ name: "__TEST__時間", price: 500, unit: "hour" }, { name: "__TEST__回", price: 300, unit: "once" }]).select("id")).data ?? [];
+      try {
+        q = await qp({ p_room_id: hall, p_people: 5, p_extras: ["__TEST__時間", "__TEST__回"] });
+        const hb = Math.round(S.hall_per_hour * 1.5), hx = Math.round(500 * 1.5 + 300);
+        check(`ホール 1時間30分＋楽器(500/時・300/回) = ${hb}+${hx}（人数は関係なし）`, q?.base === hb && q?.extras === hx && q?.net === hb + hx, JSON.stringify(q));
+      } finally {
+        await a.from("hall_extras").delete().in("id", tmp.map((x) => x.id));
+      }
+
+      // 予約に保存される料金
+      r = await a.from("reservations").insert({ room_id: ROOM, name: "__TEST__", start_at: at("13:00"), end_at: at("14:00"), category: "rental", people: 3 })
+        .select("id, price_net, price_total");
+      const rent = r.data?.[0];
+      const n3 = S.base_per_hour + 2 * S.add_per_person;
+      check(`保存時に料金が記録される（3人1時間 = 税抜 ${n3}）`, rent?.price_net === n3 && rent?.price_total === n3 + tax(n3), desc(r));
+      r = await a.from("reservations").update({ people: 1 }).eq("id", rent?.id).select("price_net");
+      check("人数を変えると料金も計算し直される", r.data?.[0]?.price_net === S.base_per_hour, desc(r));
+      r = await a.from("reservations").update({ note: "x" }).eq("id", rent?.id).select("price_net");
+      check("料金に関係ない項目の変更では料金は変わらない", r.data?.[0]?.price_net === S.base_per_hour, desc(r));
+      r = await a.from("reservations").update({ price_total: 1 }).eq("id", rent?.id).select();
+      check("料金の列は画面から直接書き換えられない", !!r.error, desc(r));
+      const pubRow = (await a.from("reservations").select("price_net, payment").eq("room_id", ROOM).eq("start_at", at("12:00")).eq("status", "confirmed").is("deleted_at", null)).data?.[0];
+      const half = Math.round(S.base_per_hour * 0.5);
+      check(`一般の予約（30分）にも料金が記録される（有料設定なら税抜 ${half}）`, S.public_charge ? pubRow?.price_net === half : pubRow?.price_net === 0, JSON.stringify(pubRow));
+      // 一般予約を無料にする設定（テスト後に元へ戻す）
+      try {
+        await a.from("price_settings").update({ public_charge: false }).eq("id", 1);
+        r = await book("20:00", "20:30");
+        const free = (await a.from("reservations").select("payment, price_total").eq("id", r.data).single()).data;
+        check("「一般予約を有料にする」をオフにすると、一般の予約は無料・0円で入る", free?.payment === "free" && free?.price_total === 0, JSON.stringify(free));
+      } finally {
+        await a.from("price_settings").update({ public_charge: S.public_charge }).eq("id", 1);
+      }
+      check("料金設定を元に戻した", (await a.from("price_settings").select("public_charge").eq("id", 1).single()).data?.public_charge === S.public_charge);
+
+      // 定期レッスン
+      const cl = (await a.from("closures").insert({ room_id: null, start_at: at("10:00", plus(14)), end_at: at("11:00", plus(14)), reason: "__TEST__" }).select("id")).data?.[0]?.id;
+      try {
+        r = await a.rpc("create_series", seriesArgs());
+        const pl = r.data ?? [];
+        const reasonOf = (n) => pl.find((x) => x.day === plus(n))?.reason ?? "";
+        check("定期の確認：5回のうち登録できるのは3回", pl.length === 5 && pl.filter((x) => x.ok).length === 3, desc(r));
+        check("ほかの予約と重なる日は「重複」として外す", !pl.find((x) => x.day === date)?.ok && reasonOf(0).startsWith("重複"), reasonOf(0));
+        check("予約不可枠の日は外し、理由を返す", reasonOf(14) === "予約不可（__TEST__）", reasonOf(14));
+        r = await a.from("reservations").select("id").eq("course", "__SERIES__");
+        check("確認だけ（dry run）では登録されない", r.data?.length === 0, desc(r));
+        r = await a.rpc("create_series", seriesArgs({ p_dry_run: false }));
+        const made = (r.data ?? []).filter((x) => x.ok && x.id);
+        check("定期を登録すると3件入る", made.length === 3, desc(r));
+        r = await a.from("reservations").select("series_id, source").in("id", made.map((x) => x.id));
+        const sid = r.data?.[0]?.series_id;
+        check("3件とも同じ series_id・流入元は admin", !!sid && r.data.every((x) => x.series_id === sid && x.source === "admin"), desc(r));
+        r = await a.from("reservations").update({ deleted_at: new Date().toISOString() }).eq("series_id", sid).is("deleted_at", null)
+          .gte("start_at", at("00:00", plus(21))).select("id");
+        check("指定日以降の定期をまとめて削除できる（2件）", r.data?.length === 2, desc(r));
+        r = await a.from("reservations").select("id").eq("series_id", sid).is("deleted_at", null);
+        check("それより前の1件は残る", r.data?.length === 1, desc(r));
+      } finally {
+        await a.from("closures").delete().eq("id", cl);
+      }
+
+      // 空き教室検索
+      r = await a.rpc("search_free_rooms", searchArgs());
+      const ids = (r.data ?? []).map((x) => x.room_id);
+      check("予約が入っている部屋は検索結果に出ない", !r.error && !ids.includes(ROOM) && (!OTHER || !ids.includes(OTHER)), desc(r));
+      const any = r.data?.find((x) => !x.is_hall);
+      const exp = any && (await qp({ p_room_id: any.room_id, p_people: 1, p_start_at: at("15:30"), p_end_at: at("16:30") }));
+      check("検索結果の料金は quote_price と同じ", !!any && any.total === exp?.total, `${any?.name} ${any?.total} / ${exp?.total}`);
+      r = await a.rpc("search_free_rooms", searchArgs({ p_keyword: "ホール" }));
+      check("設備「ホール」で絞るとホールだけ", r.data?.length >= 1 && r.data.every((x) => x.is_hall), desc(r));
+      r = await a.rpc("search_free_rooms", searchArgs({ p_keyword: "グランドピアノ" }));
+      check("楽器で絞ると、その楽器がある部屋だけ", r.data?.length >= 1 && r.data.every((x) => (x.instruments ?? "").includes("グランドピアノ")), desc(r));
+      r = await a.rpc("search_free_rooms", searchArgs({ p_people: 31 }));
+      check("定員より多い人数では出ない", !r.error && r.data.every((x) => x.capacity == null || x.capacity >= 31), desc(r));
+    } else {
+      console.log("\n⚠ migration 006 が未実行のため、料金・定期・空き教室検索のテストはスキップ");
+    }
     r = await a.from("admins").insert({ user_id: "00000000-0000-0000-0000-000000000000" });
     check("管理者でも API から管理者を追加できない（SQL Editor のみ）", !!r.error, desc(r));
     await a.auth.signOut();

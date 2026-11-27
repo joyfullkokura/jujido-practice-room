@@ -299,6 +299,90 @@ async function trackPoint(page, room, time) {
   await ctx.close();
 }
 
+// ───────── 管理画面：料金・定期レッスン・空き教室検索（フェーズ②） ─────────
+{
+  const ctx = await browser.newContext({ viewport: { width: 1366, height: 900 }, locale: "ja-JP", timezoneId: "Asia/Tokyo" });
+  const page = await ctx.newPage();
+  await page.clock.setFixedTime(new Date(NOW));
+  await openAdmin(page, url);
+  const dlg = page.getByRole("dialog");
+  const priceText = async () => { await page.waitForTimeout(450); return (await page.getByTestId("price").textContent().catch(() => "")) ?? ""; };
+  const openNew = async (room, time) => { const p = await trackPoint(page, room, time); await page.mouse.click(p.x, p.y); await page.waitForTimeout(400); };
+
+  console.log("--- 管理画面：料金（DB の関数で計算した値を表示）");
+  await openNew(3, "19:00");
+  check("レッスンは料金 0円", (await priceText()).includes("税込 ¥0"), await priceText());
+  await dlg.getByLabel("予約区分").selectOption("rental");
+  await dlg.getByLabel("人数").fill("2");
+  await dlg.getByLabel("終了時刻").selectOption(String(M("20:30")));
+  check("一般教室 2人 1時間30分 → 税抜 ¥1,650・税込 ¥1,815", /税抜 ¥1,650.*税込 ¥1,815/.test(await priceText()), await priceText());
+  await dlg.getByLabel("割引（円・税抜）").fill("150");
+  check("割引 150円 → 税込 ¥1,650", (await priceText()).includes("税込 ¥1,650"), await priceText());
+  await dlg.getByLabel("料金の手動修正（税抜）").fill("1000");
+  check("手動修正 1000円 → 税込 ¥1,100（割引より優先）", (await priceText()).includes("税込 ¥1,100"), await priceText());
+  await closeSheet(page);
+
+  await openNew(5, "16:00");
+  await dlg.getByLabel("予約区分").selectOption("rental");
+  check("ホールでは追加楽器を選べる", await dlg.getByText("ホールの追加楽器・設備").count() === 1);
+  await dlg.getByRole("checkbox", { name: /グランドピアノ/ }).check();
+  await dlg.getByRole("checkbox", { name: /その他打楽器/ }).check();
+  check("ホール1時間＋グランドピアノ(500/時)＋打楽器(300/回) → 税抜 ¥2,300・税込 ¥2,530", /税抜 ¥2,300.*税込 ¥2,530/.test(await priceText()), await priceText());
+  await closeSheet(page);
+  await openNew(3, "19:00");
+  check("ホール以外の部屋では追加楽器の欄は出ない", await dlg.getByText("ホールの追加楽器・設備").count() === 0);
+  await closeSheet(page);
+
+  console.log("--- 管理画面：定期レッスン");
+  await openNew(3, "19:00");
+  await dlg.getByLabel("利用者名・団体名（必須）").fill("生徒 7");
+  await dlg.getByLabel("繰り返し", { exact: true }).selectOption("7");
+  await dlg.getByLabel("繰り返しの終了日").fill("2026-12-18");
+  await dlg.getByRole("button", { name: "登録する日を確認" }).click();
+  await page.waitForTimeout(400);
+  const plan = (await page.getByTestId("series-plan").textContent().catch(() => "")) ?? "";
+  check("毎週4回のうち、登録できる2件・登録しない2件を事前に表示", plan.includes("登録できる 2件") && plan.includes("登録しない 2件"), plan.slice(0, 60));
+  check("登録しない日の理由（重複・定休日）が一覧で出る", plan.includes("12月4日(金)") && plan.includes("重複：16:00〜17:00 生徒 3") && plan.includes("12月11日(金)") && plan.includes("定休日"));
+  await dlg.getByRole("button", { name: "2件を登録する" }).click();
+  await page.waitForTimeout(400);
+  check("登録後に結果（登録2件・登録しなかった日2件）を表示", await dlg.getByText("定期レッスンを登録しました").count() === 1
+    && await dlg.getByText(/登録 2件/).count() === 1 && await dlg.getByText(/登録しなかった日 2件/).count() === 1);
+  await dlg.getByRole("button", { name: "閉じる" }).last().click();
+  await page.waitForTimeout(400);
+  await page.locator('[data-item="4"]').click();
+  await page.waitForTimeout(400);
+  check("定期の予約には「この定期を今日以降すべて削除」が出る", await dlg.getByRole("button", { name: "この定期を今日以降すべて削除" }).count() === 1);
+  await closeSheet(page);
+  await page.locator('[data-item="2"]').click();
+  await page.waitForTimeout(400);
+  check("定期でない予約には出ない", await dlg.getByRole("button", { name: "この定期を今日以降すべて削除" }).count() === 0);
+  await closeSheet(page);
+
+  console.log("--- 管理画面：空き教室検索");
+  await page.getByRole("button", { name: "空き教室検索", exact: true }).click();
+  await page.waitForTimeout(300);
+  check("設備の候補は部屋の常設楽器から作られる", (await page.getByLabel("楽器・設備").locator("option").allTextContents()).join(",").includes("グランドピアノ"));
+  await page.getByRole("button", { name: "検索", exact: true }).click();
+  await page.waitForTimeout(400);
+  const list = page.getByRole("list", { name: "検索結果" });
+  check("空いている部屋が料金つきで出る", await list.locator("li").count() === 4 && (await list.textContent()).includes("¥1,100"), (await list.textContent())?.slice(0, 80));
+  await list.locator("li", { hasText: "L-1" }).getByRole("button", { name: "予約へ" }).click();
+  await page.waitForTimeout(500);
+  check("「予約へ」で予約表に移り、一般貸出の新規予約が開く", await dlg.getByText("新規予約").count() >= 1
+    && await dlg.getByLabel("予約区分").inputValue() === "rental" && await dlg.getByLabel("部屋").inputValue() === "3");
+  const s = await sheetTimes(page).catch(() => null);
+  check("検索した時間（10:00〜11:00）が入っている", s?.start === "10:00" && s?.end === "11:00", s ? `${s.start}〜${s.end}` : "なし");
+  await closeSheet(page);
+
+  console.log("--- 管理画面：料金設定");
+  await page.getByRole("button", { name: "料金", exact: true }).click();
+  await page.waitForTimeout(400);
+  check("料金設定と一般予約の有料／無料の切り替えが出る", await page.getByLabel("一般教室 基本料金（円/時・税抜）").inputValue() === "1000"
+    && await page.getByRole("checkbox", { name: /一般の予約画面（LINE から）の予約を有料にする/ }).isChecked());
+  check("ホールの追加楽器が並ぶ", await page.locator('input[value="グランドピアノ"]').count() === 1);
+  await ctx.close();
+}
+
 await browser.close();
 console.log(`\n結果: ${ok} 件OK / ${ng} 件NG`);
 process.exit(ng ? 1 : 0);
