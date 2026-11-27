@@ -141,6 +141,11 @@ if (!has004) {
     check("テスト用ユーザーでログインできる", !ue, ue?.message);
     r = await u.rpc("is_admin");
     check("is_admin() は false", r.data === false, desc(r));
+    // 管理者として登録されていた場合、下の「できないこと」の確認が本当に書き込んでしまうので中止する
+    if (r.data !== false) {
+      console.log("⚠ TEST_USER が管理者として扱われています。本番データを書き換えないよう、このユーザーの確認を中止します");
+      ng++;
+    } else {
     r = await u.from("reservations").select("name, school").gte("start_at", at("00:00"));
     check("予約の名前・学校名は読めない", denied(r), desc(r));
     r = await u.from("reservations").update({ status: "cancelled" }).gte("start_at", at("00:00")).select();
@@ -159,6 +164,7 @@ if (!has004) {
     check("営業時間を変えられない", denied(r), desc(r));
     r = await u.from("admins").insert({ user_id: (await u.auth.getUser()).data.user?.id });
     check("自分を管理者に登録できない", !!r.error, desc(r));
+    }
     await u.auth.signOut();
 
     console.log("--- 管理者");
