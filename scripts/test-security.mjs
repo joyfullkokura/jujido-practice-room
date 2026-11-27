@@ -389,7 +389,8 @@ if (!has004) {
         check("定期の確認：5回のうち登録できるのは3回", pl.length === 5 && pl.filter((x) => x.ok).length === 3, desc(r));
         check("ほかの予約と重なる日は「重複」として外す", !pl.find((x) => x.day === date)?.ok && reasonOf(0).startsWith("重複"), reasonOf(0));
         check("予約不可枠の日は外し、理由を返す", reasonOf(14) === "予約不可（__TEST__）", reasonOf(14));
-        r = await a.from("reservations").select("id").eq("course", "__SERIES__");
+        r = await a.from("reservations").select("id").eq("course", "__SERIES__")
+          .gte("start_at", at("00:00")).lt("start_at", at("23:59", plus(28)));
         check("確認だけ（dry run）では登録されない", r.data?.length === 0, desc(r));
         r = await a.rpc("create_series", seriesArgs({ p_dry_run: false }));
         const made = (r.data ?? []).filter((x) => x.ok && x.id);
